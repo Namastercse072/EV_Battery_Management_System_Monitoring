@@ -1,0 +1,25 @@
+version: '3.8'
+
+services:
+  calce-batt-inr:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    volumes:
+      - ./src:/app/src
+    command: python src/CALCE_BATT_INR.py --input /data/CALCE_battery_log.csv --output /data/CALCE_Preprocessed.csv
+    environment:
+      - INPUT_FILE=/data/CALCE_battery_log.csv
+      - OUTPUT_FILE=/data/CALCE_Preprocessed.csv
+    depends_on:
+      - data
+
+  data:
+    image: alpine
+    volumes:
+      - ./data:/data
+    command: tail -f /dev/null
+
+networks:
+  default:
+    driver: bridge
