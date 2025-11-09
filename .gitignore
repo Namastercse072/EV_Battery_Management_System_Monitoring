@@ -49,3 +49,7 @@ data/
 .env
 *.pem
 *.key
+
+#docker_deploy
+*.db
+*.bash_history
