@@ -1,0 +1,34 @@
+version: '3.8'
+services:
+  mqtt-broker:
+    image: eclipse-mosquitto:latest
+    container_name: mqtt-broker
+    ports:
+      - "1883:1883"
+    volumes:
+      - ./mosquitto/config:/mosquitto/config
+      - ./mosquitto/data:/mosquitto/data
+    networks:
+      - edge_net
+
+  sensor-sim:
+    build: ./
+    container_name: sensor-sim
+    depends_on:
+      - mqtt-broker
+    networks:
+      - edge_net
+    restart: unless-stopped
+  ml_inference:
+    image: tensorflow/tensorflow:2.14.0
+    volumes:
+      - ./edge/models:/models
+      - ./edge:/app
+    working_dir: /app
+    command: ["python", "inference.py"]
+
+networks:
+  edge_net:
+    driver: bridge
+
+  
