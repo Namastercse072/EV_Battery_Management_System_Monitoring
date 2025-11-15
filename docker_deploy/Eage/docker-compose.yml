@@ -12,23 +12,32 @@ services:
       - edge_net
 
   sensor-sim:
-    build: ./
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: local/sensor-sim:latest
     container_name: sensor-sim
     depends_on:
       - mqtt-broker
     networks:
       - edge_net
     restart: unless-stopped
+
   ml_inference:
     image: tensorflow/tensorflow:2.14.0
     volumes:
-      - ./edge/models:/models
+      - ./edge/models:/app/models
       - ./edge:/app
-    working_dir: /app
-    command: ["python", "inference.py"]
+    working_dir: /app/models
+    command:  bash -c "pip install scikit-learn joblib numpy paho-mqtt && python /app/models/Machine_learning.py"
+    container_name: ml_inference
+    depends_on:
+      - mqtt-broker
+    networks:
+      - edge_net
+    restart: unless-stopped
 
 networks:
   edge_net:
     driver: bridge
 
-  
