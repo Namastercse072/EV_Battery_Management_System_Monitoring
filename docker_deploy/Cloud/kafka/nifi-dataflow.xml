@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<flow version="3">
+  <!-- ConsumeFromKafka: Read from Kafka topic -->
+  <processor>
+    <name>ConsumeFromKafka_0_10</name>
+    <type>org.apache.nifi.kafka.processors.ConsumeKafka_0_10</type>
+    <config>
+      <property name="bootstrap.servers">kafka:9092</property>
+      <property name="topics">ev_raw</property>
+      <property name="group.id">nifi-consumer</property>
+      <property name="auto.offset.reset">earliest</property>
+    </config>
+  </processor>
+
+  <!-- JoltTransformJSON: Parse/enrich data -->
+  <processor>
+    <name>JoltTransformJSON</name>
+    <type>org.apache.nifi.processors.standard.JoltTransformJSON</type>
+    <config>
+      <property name="Jolt Specification">{
+        "operation": "default",
+        "spec": {
+          "timestamp": "${now()}",
+          "status": "processed"
+        }
+      }</property>
+    </config>
+  </processor>
+
+  <!-- PutSQL: Store in PostgreSQL (for Superset) -->
+  <processor>
+    <name>PutSQL</name>
+    <type>org.apache.nifi.processors.standard.PutSQL</type>
+    <config>
+      <property name="Database Connection Pooling Service">PostgreSQL_Connection_Pool</property>
+      <property name="SQL Statement">INSERT INTO battery_metrics (voltage, temperature, soc, timestamp) 
+        VALUES (${voltage}, ${temperature}, ${soc}, ${timestamp})</property>
+    </config>
+  </processor>
+
+  <!-- PublishToKafka: Forward processed data -->
+  <processor>
+    <name>PublishKafka_0_10</name>
+    <type>org.apache.nifi.kafka.processors.PublishKafka_0_10</type>
+    <config>
+      <property name="bootstrap.servers">kafka:9092</property>
+      <property name="topic">ev_processed</property>
+    </config>
+  </processor>
+</flow>
