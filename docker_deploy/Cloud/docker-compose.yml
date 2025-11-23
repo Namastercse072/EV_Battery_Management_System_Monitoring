@@ -94,7 +94,7 @@ services:
       spark-submit
       --master local[*]
       --jars /opt/spark/jars/extra/*
-      /opt/spark-apps/test_connection_kafka.py
+      /opt/spark-apps/spark_app.py
     restart: on-failure
     networks:
       - cloud_net
@@ -113,6 +113,7 @@ services:
     environment:
       - POSTGRES_USER=superset
       - POSTGRES_PASSWORD=superset_pass
+      - POSTGRES_DB=superset_db
     ports:
       - "5432:5432"
     volumes:
@@ -137,13 +138,16 @@ services:
   # 5. Data Visualization (Superset)
   # ============================
   superset:
-    image: apache/superset:latest
+    build:
+      context: .
+      dockerfile: ./superset/Dockerfile
+    image: local/superset:latest
     container_name: superset
     ports:
       - "8088:8088"
     environment:
-      - SUPERSET_LOAD_EXAMPLES=no
-      - SUPERSET_SECRET_KEY=supersecret123
+      - SUPERSET_LOAD_EXAMPLES=yes
+      - SUPERSET_SECRET_KEY=mysecret
       - DATABASE_DB=superset_db
       - DATABASE_HOST=postgres
       - DATABASE_PORT=5432
@@ -152,19 +156,24 @@ services:
       - DATABASE_DIALECT=postgresql
       - REDIS_HOST=redis
       - REDIS_PORT=6379
+      - CACHE_CONFIG={"CACHE_TYPE":"RedisCache","CACHE_DEFAULT_TIMEOUT":300,"CACHE_KEY_PREFIX":"superset_","CACHE_REDIS_URL":"redis://redis:6379/0"}
+      - DATA_CACHE_CONFIG={"CACHE_TYPE":"RedisCache","CACHE_DEFAULT_TIMEOUT":300,"CACHE_KEY_PREFIX":"data_","CACHE_REDIS_URL":"redis://redis:6379/1"}
+      # - SQLALCHEMY_DATABASE_URI=postgresql+psycopg2://superset:superset_pass@postgres:5432/superset_db
     volumes:
       - superset-config:/home/superset/.superset
       - superset-logs:/var/log/superset
+      - ./superset_home:/app/superset_home
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
-    command: bash -c "superset db upgrade && superset fab create-admin --username admin --firstname Admin --lastname User --email admin@superset.local --password admin 2>/dev/null || true && gunicorn -w 2 -b 0.0.0.0:8088 --timeout 120 'superset.app:create_app()'"
+    command: bash -c "
+      superset db upgrade && superset fab create-admin --username admin --firstname Admin --lastname User --email admin@superset.local --password admin 2>/dev/null || true && gunicorn -w 2 -b 0.0.0.0:8088 --timeout 120 'superset.app:create_app()'"
     restart: on-failure
     networks:
       - cloud_net
-    healthcheck:
+    healthcheck:  
       test: ["CMD", "curl", "-f", "http://localhost:8088/health"]
       interval: 30s
       timeout: 10s

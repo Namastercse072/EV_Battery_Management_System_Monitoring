@@ -1,302 +1,406 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<flow version="3">
-  <settings>
-    <setting name="flowFileRepository">./flowfile_repository</setting>
-    <setting name="contentRepository">./content_repository</setting>
-    <setting name="databaseRepository">./database_repository</setting>
-  </settings>
+<template encoding-version="1.2">
+  <description>EV Battery Management System - Real-time Monitoring Pipeline</description>
+  <name>EV_Battery_Monitoring</name>
+  <snippet>
+    <processGroups/>
+    <processors>
+      <!-- ============================
+           PROCESSOR 1: Consume from Kafka (ev_raw)
+           ============================= -->
+      <processor>
+        <id>ConsumeKafka_1</id>
+        <name>📥 ConsumeKafka (ev_raw)</name>
+        <type>org.apache.nifi.kafka.processors.ConsumeKafka_1_0</type>
+        <position x="100.0" y="100.0"/>
+        <size x="224.0" y="100.0"/>
+        <style/>
+        <comment>Consume raw battery sensor data from Kafka</comment>
+        <config>
+          <schedulingStrategy>TIMER_DRIVEN</schedulingStrategy>
+          <schedulingPeriod>0 sec</schedulingPeriod>
+          <schedulingThreadCount>1</schedulingThreadCount>
+          <penaltyDuration>30 sec</penaltyDuration>
+          <yieldDuration>1 sec</yieldDuration>
+          <bulletinLevel>WARN</bulletinLevel>
+          <properties>
+            <property name="bootstrap.servers">kafka:9092</property>
+            <property name="topics">ev_raw</property>
+            <property name="group.id">nifi-battery-consumer</property>
+            <property name="auto.offset.reset">earliest</property>
+            <property name="max.poll.records">100</property>
+          </properties>
+          <autoTerminatedRelationships/>
+        </config>
+        <relationshipObjects>
+          <relationship name="success"/>
+          <relationship name="parse.failure"/>
+        </relationshipObjects>
+      </processor>
 
-  <!-- ============================
-       PROCESSOR 1: Consume from Kafka
-       ============================= -->
-  <processor>
-    <id>ConsumeKafka_1</id>
-    <name>📥 ConsumeKafka (ev_raw)</name>
-    <type>org.apache.nifi.kafka.processors.ConsumeKafka_0_10</type>
-    <position>100, 100</position>
-    <config>
-      <property name="bootstrap.servers">kafka:9092</property>
-      <property name="topics">ev_raw</property>
-      <property name="group.id">nifi-battery-consumer</property>
-      <property name="auto.offset.reset">earliest</property>
-      <property name="max.poll.records">100</property>
-      <property name="session.timeout.ms">30000</property>
-    </config>
-    <relationships>
-      <relationship name="success">LogAttribute_1</relationship>
-      <relationship name="parse.failure">LogError_1</relationship>
-    </relationships>
-  </processor>
+      <!-- ============================
+           PROCESSOR 2: Log Incoming Messages
+           ============================= -->
+      <processor>
+        <id>LogAttribute_1</id>
+        <name>📋 LogAttribute (Debug)</name>
+        <type>org.apache.nifi.processors.standard.LogAttribute</type>
+        <position x="350.0" y="100.0"/>
+        <size x="224.0" y="100.0"/>
+        <style/>
+        <comment>Log incoming messages for debugging</comment>
+        <config>
+          <schedulingStrategy>EVENT_DRIVEN</schedulingStrategy>
+          <schedulingPeriod>0 sec</schedulingPeriod>
+          <schedulingThreadCount>1</schedulingThreadCount>
+          <penaltyDuration>30 sec</penaltyDuration>
+          <yieldDuration>1 sec</yieldDuration>
+          <bulletinLevel>INFO</bulletinLevel>
+          <properties>
+            <property name="Log Level">INFO</property>
+            <property name="Log Payload">true</property>
+            <property name="Attributes to Log">key,value</property>
+          </properties>
+          <autoTerminatedRelationships/>
+        </config>
+        <relationshipObjects>
+          <relationship name="success"/>
+        </relationshipObjects>
+      </processor>
 
-  <!-- ============================
-       PROCESSOR 2: Log Incoming Messages
-       ============================= -->
-  <processor>
-    <id>LogAttribute_1</id>
-    <name>📋 LogAttribute (Debug)</name>
-    <type>org.apache.nifi.processors.standard.LogAttribute</type>
-    <position>300, 100</position>
-    <config>
-      <property name="Log Level">INFO</property>
-      <property name="Log Payload">true</property>
-      <property name="Attributes to Log">key,value</property>
-    </config>
-    <relationships>
-      <relationship name="success">JoltTransformJSON_1</relationship>
-    </relationships>
-  </processor>
-
-  <!-- ============================
-       PROCESSOR 3: Transform/Parse JSON
-       ============================= -->
-  <processor>
-    <id>JoltTransformJSON_1</id>
-    <name>🔄 JoltTransformJSON (Enrich)</name>
-    <type>org.apache.nifi.processors.standard.JoltTransformJSON</type>
-    <position>500, 100</position>
-    <config>
-      <property name="Jolt Specification">{
-  "operation": "default",
+      <!-- ============================
+           PROCESSOR 3: Transform/Parse JSON
+           ============================= -->
+      <processor>
+        <id>JoltTransformJSON_1</id>
+        <name>🔄 JoltTransformJSON (Enrich)</name>
+        <type>org.apache.nifi.processors.standard.JoltTransformJSON</type>
+        <position x="600.0" y="100.0"/>
+        <size x="224.0" y="100.0"/>
+        <style/>
+        <comment>Transform and enrich JSON data</comment>
+        <config>
+          <schedulingStrategy>EVENT_DRIVEN</schedulingStrategy>
+          <schedulingPeriod>0 sec</schedulingPeriod>
+          <schedulingThreadCount>1</schedulingThreadCount>
+          <penaltyDuration>30 sec</penaltyDuration>
+          <yieldDuration>1 sec</yieldDuration>
+          <bulletinLevel>WARN</bulletinLevel>
+          <properties>
+            <property name="Jolt Specification">{
+  "operation": "shift",
   "spec": {
-    "processed_at": "${now()}",
-    "source": "nifi",
-    "status": "transformed"
+    "voltage": "voltage",
+    "temperature": "temperature",
+    "current": "current",
+    "soc": "soc",
+    "soh": "soh",
+    "timestamp": "timestamp"
   }
 }</property>
-      <property name="Pretty Print JSON">true</property>
-    </config>
-    <relationships>
-      <relationship name="success">EvaluateJsonPath_1</relationship>
-      <relationship name="failure">LogError_2</relationship>
-    </relationships>
-  </processor>
+            <property name="Pretty Print JSON">true</property>
+          </properties>
+          <autoTerminatedRelationships/>
+        </config>
+        <relationshipObjects>
+          <relationship name="success"/>
+          <relationship name="failure"/>
+        </relationshipObjects>
+      </processor>
 
-  <!-- ============================
-       PROCESSOR 4: Extract JSON Fields
-       ============================= -->
-  <processor>
-    <id>EvaluateJsonPath_1</id>
-    <name>📊 EvaluateJsonPath (Extract)</name>
-    <type>org.apache.nifi.processors.standard.EvaluateJsonPath</type>
-    <position>700, 100</position>
-    <config>
-      <property name="Destination">flowfile-attribute</property>
-      <property name="Return Type">auto</property>
-      <property name="voltage">$.voltage</property>
-      <property name="temperature">$.temperature</property>
-      <property name="soc">$.soc</property>
-      <property name="soh">$.soh</property>
-      <property name="timestamp">$.timestamp</property>
-    </config>
-    <relationships>
-      <relationship name="match">SplitJson_1</relationship>
-      <relationship name="unmatched">LogError_3</relationship>
-    </relationships>
-  </processor>
+      <!-- ============================
+           PROCESSOR 4: Extract JSON Fields
+           ============================= -->
+      <processor>
+        <id>EvaluateJsonPath_1</id>
+        <name>📊 EvaluateJsonPath (Extract)</name>
+        <type>org.apache.nifi.processors.standard.EvaluateJsonPath</type>
+        <position x="850.0" y="100.0"/>
+        <size x="224.0" y="100.0"/>
+        <style/>
+        <comment>Extract fields to attributes for routing</comment>
+        <config>
+          <schedulingStrategy>EVENT_DRIVEN</schedulingStrategy>
+          <schedulingPeriod>0 sec</schedulingPeriod>
+          <schedulingThreadCount>1</schedulingThreadCount>
+          <penaltyDuration>30 sec</penaltyDuration>
+          <yieldDuration>1 sec</yieldDuration>
+          <bulletinLevel>WARN</bulletinLevel>
+          <properties>
+            <property name="Destination">flowfile-attribute</property>
+            <property name="Return Type">auto</property>
+            <property name="voltage">$.voltage</property>
+            <property name="temperature">$.temperature</property>
+            <property name="soc">$.soc</property>
+            <property name="soh">$.soh</property>
+            <property name="current">$.current</property>
+            <property name="timestamp">$.timestamp</property>
+          </properties>
+          <autoTerminatedRelationships/>
+        </config>
+        <relationshipObjects>
+          <relationship name="match"/>
+          <relationship name="unmatched"/>
+        </relationshipObjects>
+      </processor>
 
-  <!-- ============================
-       PROCESSOR 5: Split JSON (batch processing)
-       ============================= -->
-  <processor>
-    <id>SplitJson_1</id>
-    <name>✂️ SplitJson (Batch)</name>
-    <type>org.apache.nifi.processors.standard.SplitJson</type>
-    <position>900, 100</position>
-    <config>
-      <property name="JsonPath Expression">$.*</property>
-    </config>
-    <relationships>
-      <relationship name="success">PutSQL_PostgreSQL</relationship>
-    </relationships>
-  </processor>
+      <!-- ============================
+           PROCESSOR 5: Anomaly Detection (Route)
+           ============================= -->
+      <processor>
+        <id>RouteOnAttribute_Anomaly</id>
+        <name>⚠️ RouteOnAttribute (Anomaly)</name>
+        <type>org.apache.nifi.processors.standard.RouteOnAttribute</type>
+        <position x="850.0" y="250.0"/>
+        <size x="224.0" y="100.0"/>
+        <style/>
+        <comment>Route data based on anomaly thresholds</comment>
+        <config>
+          <schedulingStrategy>EVENT_DRIVEN</schedulingStrategy>
+          <schedulingPeriod>0 sec</schedulingPeriod>
+          <schedulingThreadCount>1</schedulingThreadCount>
+          <penaltyDuration>30 sec</penaltyDuration>
+          <yieldDuration>1 sec</yieldDuration>
+          <bulletinLevel>WARN</bulletinLevel>
+          <properties>
+            <property name="Routing Strategy">Route to Property name</property>
+            <property name="voltage_high">${voltage:gt(4.2)}</property>
+            <property name="temperature_high">${temperature:gt(50)}</property>
+            <property name="soc_low">${soc:lt(20)}</property>
+            <property name="soh_critical">${soh:lt(50)}</property>
+            <property name="voltage_low">${voltage:lt(2.5)}</property>
+          </properties>
+          <autoTerminatedRelationships/>
+        </config>
+        <relationshipObjects>
+          <relationship name="voltage_high"/>
+          <relationship name="temperature_high"/>
+          <relationship name="soc_low"/>
+          <relationship name="soh_critical"/>
+          <relationship name="voltage_low"/>
+          <relationship name="unmatched"/>
+        </relationshipObjects>
+      </processor>
 
-  <!-- ============================
-       PROCESSOR 6: Write to PostgreSQL Database
-       ============================= -->
-  <processor>
-    <id>PutSQL_PostgreSQL</id>
-    <name>💾 PutSQL (PostgreSQL)</name>
-    <type>org.apache.nifi.processors.standard.PutSQL</type>
-    <position>100, 300</position>
-    <config>
-      <property name="Database Connection Pooling Service">PostgreSQL_Connection_Pool</property>
-      <property name="SQL Statement">INSERT INTO battery_metrics 
-        (voltage, temperature, current, soc, soh, timestamp) 
-        VALUES (?, ?, ?, ?, ?, NOW())
-        ON CONFLICT DO NOTHING</property>
-      <property name="Translate Database-Specific Datatypes">true</property>
-    </config>
-    <relationships>
-      <relationship name="success">PublishKafka_Processed</relationship>
-      <relationship name="failure">LogError_4</relationship>
-      <relationship name="retry">PutSQL_PostgreSQL</relationship>
-    </relationships>
-  </processor>
+      <!-- ============================
+           PROCESSOR 6: Publish Normal Data to Kafka
+           ============================= -->
+      <processor>
+        <id>PublishKafka_Processed</id>
+        <name>📤 PublishKafka (ev_processed)</name>
+        <type>org.apache.nifi.kafka.processors.PublishKafka_1_0</type>
+        <position x="350.0" y="250.0"/>
+        <size x="224.0" y="100.0"/>
+        <style/>
+        <comment>Publish processed data to Kafka</comment>
+        <config>
+          <schedulingStrategy>EVENT_DRIVEN</schedulingStrategy>
+          <schedulingPeriod>0 sec</schedulingPeriod>
+          <schedulingThreadCount>1</schedulingThreadCount>
+          <penaltyDuration>30 sec</penaltyDuration>
+          <yieldDuration>1 sec</yieldDuration>
+          <bulletinLevel>WARN</bulletinLevel>
+          <properties>
+            <property name="bootstrap.servers">kafka:9092</property>
+            <property name="topic">ev_processed</property>
+            <property name="key.attribute.encoding">utf-8</property>
+          </properties>
+          <autoTerminatedRelationships/>
+        </config>
+        <relationshipObjects>
+          <relationship name="success"/>
+          <relationship name="failure"/>
+        </relationshipObjects>
+      </processor>
 
-  <!-- ============================
-       PROCESSOR 7: Publish to Kafka (processed data)
-       ============================= -->
-  <processor>
-    <id>PublishKafka_Processed</id>
-    <name>📤 PublishKafka (ev_processed)</name>
-    <type>org.apache.nifi.kafka.processors.PublishKafka_0_10</type>
-    <position>300, 300</position>
-    <config>
-      <property name="bootstrap.servers">kafka:9092</property>
-      <property name="topic">ev_processed</property>
-      <property name="key.attribute.encoding">utf-8</property>
-      <property name="message.demarcator">\n</property>
-      <property name="Compression Type">snappy</property>
-    </config>
-    <relationships>
-      <relationship name="success">LogSuccess</relationship>
-      <relationship name="failure">LogError_5</relationship>
-    </relationships>
-  </processor>
+      <!-- ============================
+           PROCESSOR 7: Publish Alerts to Kafka
+           ============================= -->
+      <processor>
+        <id>PublishKafka_Alerts</id>
+        <name>🚨 PublishKafka (ev_alerts)</name>
+        <type>org.apache.nifi.kafka.processors.PublishKafka_1_0</type>
+        <position x="1100.0" y="250.0"/>
+        <size x="224.0" y="100.0"/>
+        <style/>
+        <comment>Publish alert data to Kafka</comment>
+        <config>
+          <schedulingStrategy>EVENT_DRIVEN</schedulingStrategy>
+          <schedulingPeriod>0 sec</schedulingPeriod>
+          <schedulingThreadCount>1</schedulingThreadCount>
+          <penaltyDuration>30 sec</penaltyDuration>
+          <yieldDuration>1 sec</yieldDuration>
+          <bulletinLevel>WARN</bulletinLevel>
+          <properties>
+            <property name="bootstrap.servers">kafka:9092</property>
+            <property name="topic">ev_alerts</property>
+            <property name="key.attribute.encoding">utf-8</property>
+          </properties>
+          <autoTerminatedRelationships/>
+        </config>
+        <relationshipObjects>
+          <relationship name="success"/>
+          <relationship name="failure"/>
+        </relationshipObjects>
+      </processor>
 
-  <!-- ============================
-       PROCESSOR 8: Anomaly Detection (Branching)
-       ============================= -->
-  <processor>
-    <id>RouteonAttribute_Anomaly</id>
-    <name>⚠️ RouteOnAttribute (Anomaly Check)</name>
-    <type>org.apache.nifi.processors.standard.RouteOnAttribute</type>
-    <position>500, 300</position>
-    <config>
-      <property name="voltage_high">${voltage:gt(4.2)}</property>
-      <property name="temperature_high">${temperature:gt(50)}</property>
-      <property name="soc_low">${soc:lt(20)}</property>
-      <property name="soh_critical">${soh:lt(50)}</property>
-    </config>
-    <relationships>
-      <relationship name="voltage_high">PublishKafka_Alerts</relationship>
-      <relationship name="temperature_high">PublishKafka_Alerts</relationship>
-      <relationship name="soc_low">PublishKafka_Alerts</relationship>
-      <relationship name="soh_critical">PublishKafka_Alerts</relationship>
-      <relationship name="unmatched">LogSuccess</relationship>
-    </relationships>
-  </processor>
+      <!-- ============================
+           PROCESSOR 8: Success Logger
+           ============================= -->
+      <processor>
+        <id>LogSuccess</id>
+        <name>✅ LogAttribute (Success)</name>
+        <type>org.apache.nifi.processors.standard.LogAttribute</type>
+        <position x="350.0" y="400.0"/>
+        <size x="224.0" y="100.0"/>
+        <style/>
+        <comment>Log successful processed records</comment>
+        <config>
+          <schedulingStrategy>EVENT_DRIVEN</schedulingStrategy>
+          <schedulingPeriod>0 sec</schedulingPeriod>
+          <schedulingThreadCount>1</schedulingThreadCount>
+          <penaltyDuration>30 sec</penaltyDuration>
+          <yieldDuration>1 sec</yieldDuration>
+          <bulletinLevel>INFO</bulletinLevel>
+          <properties>
+            <property name="Log Level">INFO</property>
+            <property name="Log Payload">false</property>
+            <property name="Prefix">SUCCESS</property>
+          </properties>
+          <autoTerminatedRelationships>
+            <relationship name="success"/>
+          </autoTerminatedRelationships>
+        </config>
+        <relationshipObjects>
+          <relationship name="success"/>
+        </relationshipObjects>
+      </processor>
 
-  <!-- ============================
-       PROCESSOR 9: Publish Alerts to Kafka
-       ============================= -->
-  <processor>
-    <id>PublishKafka_Alerts</id>
-    <name>🚨 PublishKafka (ev_alerts)</name>
-    <type>org.apache.nifi.kafka.processors.PublishKafka_0_10</type>
-    <position>700, 300</position>
-    <config>
-      <property name="bootstrap.servers">kafka:9092</property>
-      <property name="topic">ev_alerts</property>
-      <property name="key.attribute.encoding">utf-8</property>
-    </config>
-    <relationships>
-      <relationship name="success">LogAlerts</relationship>
-      <relationship name="failure">LogError_6</relationship>
-    </relationships>
-  </processor>
+      <!-- ============================
+           PROCESSOR 9: Alert Logger
+           ============================= -->
+      <processor>
+        <id>LogAlerts</id>
+        <name>⚠️ LogAttribute (Alerts)</name>
+        <type>org.apache.nifi.processors.standard.LogAttribute</type>
+        <position x="1100.0" y="400.0"/>
+        <size x="224.0" y="100.0"/>
+        <style/>
+        <comment>Log detected anomalies</comment>
+        <config>
+          <schedulingStrategy>EVENT_DRIVEN</schedulingStrategy>
+          <schedulingPeriod>0 sec</schedulingPeriod>
+          <schedulingThreadCount>1</schedulingThreadCount>
+          <penaltyDuration>30 sec</penaltyDuration>
+          <yieldDuration>1 sec</yieldDuration>
+          <bulletinLevel>WARN</bulletinLevel>
+          <properties>
+            <property name="Log Level">WARN</property>
+            <property name="Log Payload">true</property>
+            <property name="Prefix">ALERT_DETECTED</property>
+          </properties>
+          <autoTerminatedRelationships>
+            <relationship name="success"/>
+          </autoTerminatedRelationships>
+        </config>
+        <relationshipObjects>
+          <relationship name="success"/>
+        </relationshipObjects>
+      </processor>
+    </processors>
 
-  <!-- ============================
-       PROCESSOR 10: Success Logging
-       ============================= -->
-  <processor>
-    <id>LogSuccess</id>
-    <name>✅ LogAttribute (Success)</name>
-    <type>org.apache.nifi.processors.standard.LogAttribute</type>
-    <position>500, 500</position>
-    <config>
-      <property name="Log Level">INFO</property>
-      <property name="Log Payload">false</property>
-      <property name="Prefix">SUCCESS</property>
-    </config>
-    <relationships>
-      <relationship name="success">drop-success</relationship>
-    </relationships>
-  </processor>
+    <connections>
+      <!-- ============================
+           CONNECTIONS (Data Flow)
+           ============================= -->
+      <connection>
+        <id>conn-1</id>
+        <name>ConsumeKafka → LogAttribute</name>
+        <source id="ConsumeKafka_1" rel="success"/>
+        <destination id="LogAttribute_1"/>
+      </connection>
 
-  <!-- ============================
-       PROCESSOR 11: Alert Logging
-       ============================= -->
-  <processor>
-    <id>LogAlerts</id>
-    <name>⚠️ LogAttribute (Alerts)</name>
-    <type>org.apache.nifi.processors.standard.LogAttribute</type>
-    <position>700, 500</position>
-    <config>
-      <property name="Log Level">WARN</property>
-      <property name="Log Payload">true</property>
-      <property name="Prefix">ALERT_DETECTED</property>
-    </config>
-    <relationships>
-      <relationship name="success">drop-alert</relationship>
-    </relationships>
-  </processor>
+      <connection>
+        <id>conn-2</id>
+        <name>LogAttribute → JoltTransform</name>
+        <source id="LogAttribute_1" rel="success"/>
+        <destination id="JoltTransformJSON_1"/>
+      </connection>
 
-  <!-- ============================
-       ERROR HANDLERS
-       ============================= -->
-  <processor>
-    <id>LogError_1</id>
-    <name>❌ LogAttribute (Error-Parse)</name>
-    <type>org.apache.nifi.processors.standard.LogAttribute</type>
-    <position>100, 650</position>
-    <config>
-      <property name="Log Level">ERROR</property>
-      <property name="Log Payload">true</property>
-      <property name="Prefix">ERROR_PARSE</property>
-    </config>
-  </processor>
+      <connection>
+        <id>conn-3</id>
+        <name>JoltTransform → EvaluateJsonPath</name>
+        <source id="JoltTransformJSON_1" rel="success"/>
+        <destination id="EvaluateJsonPath_1"/>
+      </connection>
 
-  <processor>
-    <id>LogError_2</id>
-    <name>❌ LogAttribute (Error-Transform)</name>
-    <type>org.apache.nifi.processors.standard.LogAttribute</type>
-    <position>300, 650</position>
-    <config>
-      <property name="Log Level">ERROR</property>
-      <property name="Log Payload">true</property>
-      <property name="Prefix">ERROR_TRANSFORM</property>
-    </config>
-  </processor>
+      <connection>
+        <id>conn-4</id>
+        <name>EvaluateJsonPath → RouteOnAttribute</name>
+        <source id="EvaluateJsonPath_1" rel="match"/>
+        <destination id="RouteOnAttribute_Anomaly"/>
+      </connection>
 
-  <!-- Connection definitions -->
-  <connection>
-    <source id="ConsumeKafka_1" rel="success"/>
-    <destination id="LogAttribute_1"/>
-  </connection>
+      <connection>
+        <id>conn-5</id>
+        <name>RouteOnAttribute → PublishKafka (Normal)</name>
+        <source id="RouteOnAttribute_Anomaly" rel="unmatched"/>
+        <destination id="PublishKafka_Processed"/>
+      </connection>
 
-  <connection>
-    <source id="LogAttribute_1" rel="success"/>
-    <destination id="JoltTransformJSON_1"/>
-  </connection>
+      <connection>
+        <id>conn-6</id>
+        <name>PublishKafka (Normal) → LogSuccess</name>
+        <source id="PublishKafka_Processed" rel="success"/>
+        <destination id="LogSuccess"/>
+      </connection>
 
-  <connection>
-    <source id="JoltTransformJSON_1" rel="success"/>
-    <destination id="EvaluateJsonPath_1"/>
-  </connection>
+      <connection>
+        <id>conn-7</id>
+        <name>RouteOnAttribute → PublishKafka (Alerts)</name>
+        <source id="RouteOnAttribute_Anomaly" rel="voltage_high"/>
+        <destination id="PublishKafka_Alerts"/>
+      </connection>
 
-  <connection>
-    <source id="EvaluateJsonPath_1" rel="match"/>
-    <destination id="RouteonAttribute_Anomaly"/>
-  </connection>
+      <connection>
+        <id>conn-8</id>
+        <name>RouteOnAttribute → PublishKafka (Alerts)</name>
+        <source id="RouteOnAttribute_Anomaly" rel="temperature_high"/>
+        <destination id="PublishKafka_Alerts"/>
+      </connection>
 
-  <connection>
-    <source id="RouteonAttribute_Anomaly" rel="voltage_high,temperature_high,soc_low,soh_critical"/>
-    <destination id="PublishKafka_Alerts"/>
-  </connection>
+      <connection>
+        <id>conn-9</id>
+        <name>RouteOnAttribute → PublishKafka (Alerts)</name>
+        <source id="RouteOnAttribute_Anomaly" rel="soc_low"/>
+        <destination id="PublishKafka_Alerts"/>
+      </connection>
 
-  <connection>
-    <source id="PublishKafka_Alerts" rel="success"/>
-    <destination id="LogAlerts"/>
-  </connection>
+      <connection>
+        <id>conn-10</id>
+        <name>RouteOnAttribute → PublishKafka (Alerts)</name>
+        <source id="RouteOnAttribute_Anomaly" rel="soh_critical"/>
+        <destination id="PublishKafka_Alerts"/>
+      </connection>
 
-  <connection>
-    <source id="RouteonAttribute_Anomaly" rel="unmatched"/>
-    <destination id="PutSQL_PostgreSQL"/>
-  </connection>
+      <connection>
+        <id>conn-11</id>
+        <name>RouteOnAttribute → PublishKafka (Alerts)</name>
+        <source id="RouteOnAttribute_Anomaly" rel="voltage_low"/>
+        <destination id="PublishKafka_Alerts"/>
+      </connection>
 
-  <connection>
-    <source id="PutSQL_PostgreSQL" rel="success"/>
-    <destination id="LogSuccess"/>
-  </connection>
-</flow>
+      <connection>
+        <id>conn-12</id>
+        <name>PublishKafka (Alerts) → LogAlerts</name>
+        <source id="PublishKafka_Alerts" rel="success"/>
+        <destination id="LogAlerts"/>
+      </connection>
+    </connections>
+
+    <controllerServices/>
+    <funnels/>
+    <labels/>
+    <ports/>
+  </snippet>
+</template>

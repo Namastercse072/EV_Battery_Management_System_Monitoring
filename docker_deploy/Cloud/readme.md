@@ -95,6 +95,16 @@ docker-compose ps
   - SQL queries
   - Chart creation
   - Export reports
+- ** Database:** Connects to `battery_metrics` in PostgreSQL handeling (troubleshooting below)
+  - Caches sessions in Redis  
+  - if it errors like no driver found, ensure PostgreSQL is reachable from Superset container (no module name psycopg2)
+  - then check which python, and which pip inside the superset container, and install psycopg2-binary if missing
+  - if no pip, install pip first:
+    - run apt-get update && apt-get install -y python3-pip
+  - run python -m pip install psycopg2-binary
+  - then check import psycopg2 in python shell inside superset container
+  - if successful, restart superset service
+  - Now be ready to connect to the battery_metrics database
 
 ### Spark (Stream Processing)
 - **Port:** 8888 (Master UI)

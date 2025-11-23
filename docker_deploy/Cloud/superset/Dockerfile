@@ -1,6 +1,10 @@
-FROM apache/superset:3.0.0
+FROM apache/superset:latest
 
-COPY entrypoint.sh /entrypoint.sh
-# RUN chmod +x /entrypoint.sh
+USER root
+# RUN apt-get update && apt-get install -y --no-install-recommends \
+#     gcc python3-dev libpq-dev \
+#     && pip install --no-cache-dir --upgrade psycopg2-binary redis \
+#     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
-ENTRYPOINT ["/entrypoint.sh"]
+USER superset
+# COPY superset_config.py /app/pythonpath/superset_config.py
