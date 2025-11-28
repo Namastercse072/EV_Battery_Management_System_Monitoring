@@ -78,7 +78,7 @@ services:
     container_name: spark
     ports:
       - "4040:4040"
-      - "8081:8080"
+      - "8081:8081"
     environment:
       - SPARK_MODE=master
       - SPARK_RPC_AUTHENTICATION_ENABLED=no
@@ -90,11 +90,12 @@ services:
     depends_on:
       kafka:
         condition: service_healthy
+    # for testing only
     command: >
       spark-submit
       --master local[*]
-      --jars /opt/spark/jars/extra/*
-      /opt/spark-apps/spark_app.py
+      --packages org.apache.spark:spark-sql-kafka-0-10_2.13:4.0.0
+      /opt/spark-apps/battery_processor.py
     restart: on-failure
     networks:
       - cloud_net

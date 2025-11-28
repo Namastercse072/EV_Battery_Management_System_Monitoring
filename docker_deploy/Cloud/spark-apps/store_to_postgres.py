@@ -8,10 +8,19 @@ try:
     
     spark = SparkSession.builder \
         .appName("EVBatteryPostgresStorage") \
-        .master("spark://spark-master:7077") \
         .config("spark.jars.packages", 
                 "org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.1," \
                 "org.postgresql:postgresql:42.7.1") \
+        .config("spark.sql.adaptive.enabled", "true") \
+        .config("spark.sql.shuffle.partitions", "8")  \
+        .config("spark.default.parallelism", "8") \
+        .config("spark.streaming.backpressure.enabled", "true")  \
+        .config("spark.streaming.kafka.maxRatePerPartition", "5000") \
+        .config("spark.executor.memory", "4g") \
+        .config("spark.driver.memory", "2g") \
+        .config("spark.memory.fraction", "0.7") \
+        .config("spark.sql.streaming.statefulOperator.checkCorrectness.enabled", "false") \
+        .config("spark.sql.streaming.forceDeleteTempCheckpointLocation", "true") \
         .getOrCreate()
     
     spark.sparkContext.setLogLevel("WARN")
@@ -38,15 +47,19 @@ try:
         .option("kafka.bootstrap.servers", "kafka:9092") \
         .option("subscribe", "ev_processed") \
         .option("startingOffsets", "latest") \
-        .option("failOnDataLoss", "false") \
-        .load()
+        .option("failOnDataLoss", "true") \
+        .option("fetch.min.bytes", "50000") \
+        .option("fetch.max.bytes", "52428800") \
+        .option("max.poll.records", "1000") \
+                .load()
     
     df_parsed = df.selectExpr("CAST(value AS STRING)") \
         .select(from_json(col("value"), schema).alias("data")) \
         .select("data.*")
     
     print("✓ Connected to ev_processed\n")
-    
+    print("Optimizations applied for high-throughput streaming.\n")
+
     # ============================
     # 2. Prepare for Database Write
     # ============================

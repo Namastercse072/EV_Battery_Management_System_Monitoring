@@ -113,7 +113,45 @@ docker-compose ps
   - Real-time analytics
   - Machine learning models
   - Batch processing
+--- **Jobs:** PySpark scripts in `/opt/spark-apps/`
+  - Example: `battery_processor.py` for processing battery data from Kafka
+  - Ensure Kafka package compatibility with Spark version
+  - Check `docker-compose.yml` for `--packages` argument
+  - Test connectivity with `test_connection_kafka.py`
+  - Adjust resource allocation in `docker-compose.yml` if needed
+  - Monitor via Spark UI
+  - Restart with `docker-compose restart spark-master spark-worker`
+  - Logs: `docker-compose logs -f spark-master` and `docker-compose logs -f spark-worker`
+  - Troubleshoot connectivity issues with Kafka (network, ports, versions)
+  - Validate data processing logic in PySpark scripts
+  - Scale resources based on workload
+  - Ensure proper shutdown to avoid data loss
+  - Regularly update Spark and dependencies for security and performance
+  - Backup important data and configurations
+  - Monitor system resource usage (CPU, memory, disk I/O)
+  - Optimize Spark configurations for performance tuning
+  - Consider using Spark Streaming checkpoints for fault tolerance
+  - Test with sample data before deploying to production
+  - Quickly verify cmd line connectivity to Kafka from Spark container:
+    ```bash
+    docker exec -it spark-master bash
+    spark-submit --packages org.apache.spark:spark-sql-kafka-0-10_2.13:4.0.0 --master local[*] /opt/spark-apps/test_connection_kafka.py
+    ```
+    ```python         
+    # Expected output:  
+    🔄 Initializing Spark session...
+    ✅ Connected to Kafka successfully!
+    ```
+    spark-submit --master local[*] --packages org.apache.spark:spark-sql-kafka-0-10_2.13:4.0.0 /opt/spark-apps/battery_processor.py
+    spark-submit  --master local[*]  --packages org.apache.spark:spark-sql-kafka-0-10_2.13:4.0.0,org.postgresql:postgresql:42.7.1 /opt/spark-apps/store_to_postgres.py
 
+    seq 10000 | while read i; do
+    echo "{\"id\": $i, \"voltage\": $((RANDOM%2+3
+    )), \"temp\": $((RANDOM%30+20)), \"soc\": $((RANDOM%80+10))}" | \
+    kafka-console-producer.sh --broker-list localhost:9092 --topic ev_raw
+    done
+    echo '{"test":"hello-nifi"}' | docker exec -i kafka bash -c "kafka-console-producer.sh --broker-list localhost:9092 --topic ev_raw --property parse.key=true --property key.separator=:" || true
+    bash -c "kafka-console-consumer.sh --bootstrap-server localhost:9092 --topic ev_raw --group nifi-battery-consumer --from-beginning --max-messages 1 --timeout-ms 10000"
 ### Redis (Cache & Session Store)
 - **Port:** 6379
 - **Purpose:**
