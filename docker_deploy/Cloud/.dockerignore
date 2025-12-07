@@ -1,7 +1,15 @@
-# Version control
+# Git & Version Control
 .git
 .gitignore
 .gitattributes
+
+# Documentation & Changelog
+*.md
+README.md
+LICENSE
+CHANGELOG.md
+docs/
+.github/
 
 # IDE & Editors
 .vscode
@@ -11,75 +19,50 @@
 *~
 .DS_Store
 Thumbs.db
-*.sublime-project
-*.sublime-workspace
-.nvmrc
 
-# Documentation
-*.md
-README.md
-LICENSE
-CHANGELOG.md
-docs/
-.github/
+# Sensitive Data
+.env
+.env.local
+.env.development
+.env.example
+.env.production
+secrets/
+*.key
+*.pem
+*.pfx
+*.crt
+*.p12
 
-# Node (if using any Node services)
-node_modules/
-npm-debug.log
-yarn.lock
-package-lock.json
-
-# Python
-__pycache__/
-*.pyc
-*.pyo
-*.pyd
-.Python
+# Build Artifacts
 build/
-develop-eggs/
 dist/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-wheels/
 *.egg-info/
-.installed.cfg
-*.egg
-MANIFEST
+__pycache__/
 .pytest_cache/
-.coverage
-htmlcov/
-
-# Java
-*.class
-*.jar
-*.war
-*.ear
-*.zip
 target/
 .m2/
-
-# Gradle
 .gradle/
-build/
 
-# Maven
-target/
-pom.xml.tag
-pom.xml.releaseBackup
-release.properties
+# Logs
+logs/
+*.log
+*.log.*
+
+# Dependencies
+node_modules/
+venv/
+.venv/
+vendor/
+
+# Testing
+.coverage
+htmlcov/
+test-results/
 
 # Docker
 Dockerfile
-docker-compose.yml
-docker-compose.override.yml
+docker-compose*.yml
 .docker/
-docker-build.log
 
 # CI/CD
 .github/
@@ -87,63 +70,28 @@ docker-build.log
 .travis.yml
 Jenkinsfile
 
-# Logs
-logs/
-*.log
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-
-# Temporary files
+# Temporary Files
 tmp/
 temp/
 *.tmp
 *.bak
 *.orig
 
-# OS specific
-.DS_Store
-Thumbs.db
-.env.local
-.env.*.local
+# Database Backups
+*.sql.gz
+*.sql.bak
+backups/
 
-# Testing
-.pytest_cache/
-.coverage/
-htmlcov/
-test-results/
-
-# Build artifacts
-dist/
-build/
-*.egg-info/
-
-# Dependencies (keep lightweight images)
-node_modules/
-venv/
-.venv/
-
-# Large files
+# Large Files
 *.iso
 *.dmg
 *.zip
 *.tar.gz
 *.7z
 
-# Database backups
-*.sql.gz
-*.sql.bak
-backups/
-
-# Cache
-.cache/
-__pycache__/
-*.egg-info/
-
-# Keep necessary files for initialization
+# Keep necessary files
 !postgres/01-init-dbs.sql
 !postgres/02-init-tables.sh
 !kafka/server.properties
-!kafka/entrypoint.sh
-!nifi/init-flow.sh
-!superset/entrypoint.sh
+!nifi/nifi-dataflow.xml
+!nginx/nginx.conf

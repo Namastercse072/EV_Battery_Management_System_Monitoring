@@ -1,0 +1,16 @@
+version: '3.8'
+
+services:
+  sensor-simulator:
+    environment:
+      - MQTT_HOST=mqtt-broker  # Local Eage MQTT
+      - MQTT_PORT=1883
+      - MQTT_TOPIC=ev/metrics
+    
+  mqtt-broker:
+    ports:
+      - "1883:1883"  # Expose to Cloud bridge
+
+networks:
+  edge_net:
+    driver: bridge

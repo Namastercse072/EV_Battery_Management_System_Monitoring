@@ -1,106 +1,291 @@
-# version: "3.9"
+version: "3.8"
 
 services:
   # ============================
-  # 1️⃣ Edge Gateway (MiNiFi)
+  # EDGE SERVICES (Eage)
   # ============================
-  minifi:
-    image: apache/nifi-minifi:latest
-    container_name: minifi
-    # bind the whole config directory (more cross-platform reliable than a single file mount)
-    environment:
-      - NIFI_WEB_HTTP_PORT=8443
-      - MiNiFi_home=/opt/minifi/minifi-2.6.0
+  mqtt-broker:
+    image: eclipse-mosquitto:2.0
+    container_name: mqtt-broker
+    ports:
+      - "1883:1883"
+      - "9001:9001"
     volumes:
-      - ./minifi:/opt/minifi/minifi-2.6.0/conf
-    # depends_on:
-      # - nifi
+      - ./Eage/mosquitto/config/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+      - mqtt-data:/mosquitto/data
+      - mqtt-logs:/mosquitto/log
+    healthcheck:
+      test: ["CMD", "mosquitto_sub", "-h", "localhost", "-t", "test", "-C", "1", "-i", "healthcheck"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
     restart: unless-stopped
+    networks:
+      - unified_net
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  sensor-simulator:
+    build:
+      context: ./Eage
+      dockerfile: Dockerfile
+    image: local/sensor-simulator:latest
+    container_name: sensor-simulator
+    environment:
+      - MQTT_HOST=mqtt-broker
+      - MQTT_PORT=1883
+      - MQTT_TOPIC=ev/metrics
+      - PUBLISH_INTERVAL=2
+    depends_on:
+      mqtt-broker:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - unified_net
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  ml-inference:
+    build:
+      context: ./Eage/edge
+      dockerfile: Dockerfile.ml
+    image: local/ml-inference:latest
+    container_name: ml-inference
+    environment:
+      - MQTT_HOST=mqtt-broker
+      - MQTT_PORT=1883
+      - MQTT_INPUT_TOPIC=ev/metrics
+      - MQTT_OUTPUT_TOPIC=ev/alerts
+      - MODEL_PATH=/app/models/isoforest.pkl
+      - CONTAMINATION=0.1
+      - ANOMALY_THRESHOLD=-0.5
+    depends_on:
+      mqtt-broker:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - unified_net
+    volumes:
+      - ./Eage/edge/models:/app/models:rw
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   # ============================
-  # 2️⃣ Dataflow Orchestrator (NiFi)
+  # CLOUD SERVICES
   # ============================
+  kafka:
+    build:
+      context: ./Cloud/kafka
+    image: local/kafka:3.8.0
+    container_name: kafka
+    ports:
+      - "9092:9092"
+      - "9093:9093"
+    environment:
+      - KAFKA_CLUSTER_ID=xB7zK9pL5mN2qR8vT4wX9Y
+    volumes:
+      - ./Cloud/kafka/server.properties:/opt/kafka/config/kraft/server.properties:ro
+      - kafka-data:/var/lib/kafka/data
+    healthcheck:
+      test: ["CMD", "kafka-broker-api-versions.sh", "--bootstrap-server", "localhost:9092"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 45s
+    restart: unless-stopped
+    networks:
+      - unified_net
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  mqtt-kafka-bridge:
+    build:
+      context: ./Cloud/bridge
+    image: local/mqtt-kafka-bridge:latest
+    container_name: mqtt-kafka-bridge
+    environment:
+      # ✅ Now on unified network - can reach mqtt-broker
+      - MQTT_HOST=mqtt-broker
+      - MQTT_PORT=1883
+      - MQTT_TOPICS=ev/metrics,ev/alerts
+      - KAFKA_BROKER=kafka:9092
+      - TOPIC_MAP={"ev/metrics":"ev_raw","ev/alerts":"ev_alerts_processed"}
+      - MQTT_QOS=1
+      - BATCH_SIZE=10
+      - BATCH_TIMEOUT=5
+    depends_on:
+      kafka:
+        condition: service_healthy
+      mqtt-broker:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - unified_net
+    volumes:
+      - ./Cloud/bridge/logs:/app/logs
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  postgres:
+    image: postgres:15-alpine
+    container_name: postgres
+    environment:
+      - POSTGRES_USER=superset
+      - POSTGRES_PASSWORD=superset_pass
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./Cloud/postgres_data/01-init-dbs.sql:/docker-entrypoint-initdb.d/01-init-dbs.sql
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "superset"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - unified_net
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  redis:
+    image: redis:7-alpine
+    container_name: redis
+    ports:
+      - "6379:6379"
+    command: redis-server --appendonly yes
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - unified_net
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
   nifi:
-    image: apache/nifi:latest
+    image: apache/nifi:1.25.0
     container_name: nifi
     ports:
       - "8080:8080"
-      - "8443:8443"
-    environment:
-      - NIFI_WEB_HTTP_PORT=8443
-      - NIFI_HOME=/opt/nifi/nifi-current
-    # Use a mix: bind-mount conf for easy edits, named volumes for runtime data
     volumes:
-      - ./nifi:/opt/nifi/nifi-current/conf
-    restart: unless-stopped 
-
-  # ============================
-  # 3️⃣ Stream Broker (Kafka - KRaft mode)
-  # ============================
-  kafka:
-    image: apache/kafka:latest
-    container_name: kafka
-    environment:
-      - KAFKA_CFG_NODE_ID=1
-      - KAFKA_CFG_PROCESS_ROLES=broker,controller
-      - KAFKA_CFG_CONTROLLER_QUORUM_VOTERS=1@kafka:9093
-      - KAFKA_CFG_LISTENERS=PLAINTEXT://:9092,CONTROLLER://:9093
-      - KAFKA_CFG_ADVERTISED_LISTENERS=PLAINTEXT://kafka:9092
-      - KAFKA_CFG_INTER_BROKER_LISTENER_NAME=PLAINTEXT
-      - ALLOW_PLAINTEXT_LISTENER=yes
-    ports:
-      - "9092:9092"
-    volumes:
-      - ./kafka-data:/apache/kafka
+      - nifi-conf:/opt/nifi/nifi-current/conf
+      - nifi-logs:/opt/nifi/nifi-current/logs
+    healthcheck:
+      test: ["CMD", "curl", "-s", "-o", "/dev/null", "-w", "%{http_code}", "http://localhost:8080/nifi-api/system-diagnostics"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
     restart: unless-stopped
-
-  # ============================
-  # 4️⃣ Compute Engine (Spark)
-  # ============================
-  spark:
-    image: bitnami/spark:3.5
-    container_name: spark
-    environment:
-      - SPARK_MODE=master
-    ports:  
-      - "8081:8080"
-    volumes:
-      - ./spark:/opt/spark-apps
-    command: >
-      bash -c "spark-submit --master local[*]
-      /opt/spark-apps/spark-app.py"
+    networks:
+      - unified_net
     depends_on:
-      - kafka
-    restart: unless-stopped
+      kafka:
+        condition: service_healthy
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
 
-  # ============================
-  # 5️⃣ Metadata Catalog (Atlas)
-  # ============================
-  atlas:
-    image: sburn/apache-atlas:2.2.0
-    container_name: atlas
-    ports:
-      - "21000:21000"
-    depends_on:
-      - kafka
-      # - spark
-    environment:
-      - ATLAS_OPTS=-Datlas.graph.storage.hostname=localhost
-    restart: unless-stopped
-
-  # ============================
-  # 6️⃣ Visualization (Superset)
-  # ============================
   superset:
-    image: apache/superset:3.0.0
+    build:
+      context: ./Cloud/superset
+      dockerfile: Dockerfile
+    image: local/superset:latest
     container_name: superset
     ports:
       - "8088:8088"
     environment:
-      - SUPERSET_SECRET_KEY=CalceBeatEdgeViz
-      - SUPERSET_LOAD_EXAMPLES=no
+      - SUPERSET_SECRET_KEY=mysecret
+      - DATABASE_HOST=postgres
+      - REDIS_HOST=redis
+      - SQLALCHEMY_DATABASE_URI=postgresql://superset:superset_pass@postgres:5432/superset_db
     volumes:
-      - ./superset:/app/superset_home
-    # depends_on:
-    #   - spark
+      - superset-config:/home/superset/.superset
+      - superset-logs:/var/log/superset
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
     restart: unless-stopped
+    networks:
+      - unified_net
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  spark-master:
+    build:
+      context: ./Cloud/spark-apps
+    image: local/spark:4.0.0
+    container_name: spark-master
+    ports:
+      - "8888:8080"
+      - "7077:7077"
+    environment:
+      - SPARK_MODE=master
+    volumes:
+      - ./Cloud/spark-apps:/opt/spark-apps
+      - spark-data:/opt/spark-data
+    restart: unless-stopped
+    networks:
+      - unified_net
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+# ============================
+# Volumes
+# ============================
+volumes:
+  mqtt-data:
+  mqtt-logs:
+  kafka-data:
+  postgres-data:
+  redis-data:
+  nifi-conf:
+  nifi-logs:
+  superset-config:
+  superset-logs:
+  spark-data:
+
+# ============================
+# Networks (UNIFIED)
+# ============================
+networks:
+  unified_net:
+    name: unified_network
+    driver: bridge

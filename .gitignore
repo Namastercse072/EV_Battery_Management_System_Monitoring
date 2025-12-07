@@ -53,3 +53,14 @@ data/
 #docker_deploy
 *.db
 *.bash_history
+
+# Custom ignores
+Cloud/.env.example
+Cloud/.credentials.json
+Cloud/.token.pickle
+Cloud/credentials.json
+Cloud/token.pickle
+Cloud/.gcloud/
+Cloud/.config/
+Cloud/.cache/
+Cloud/.ssh/

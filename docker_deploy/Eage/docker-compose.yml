@@ -1,43 +1,85 @@
-version: '3.8'
+version: "3.8"
+
 services:
+  # ============================
+  # MQTT Broker (Mosquitto)
+  # ============================
   mqtt-broker:
-    image: eclipse-mosquitto:latest
+    image: eclipse-mosquitto:2.0
     container_name: mqtt-broker
     ports:
-      - "1883:1883"
+      - "0.0.0.0:1883:1883"  # ✅ Expose to all interfaces
+      - "0.0.0.0:9001:9001"
     volumes:
-      - ./mosquitto/config:/mosquitto/config
+      - ./mosquitto/config/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
       - ./mosquitto/data:/mosquitto/data
+      - ./mosquitto/log:/mosquitto/log
+    healthcheck:
+      test: ["CMD", "mosquitto_sub", "-h", "localhost", "-t", "test", "-C", "1", "-i", "healthcheck"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    restart: unless-stopped
     networks:
       - edge_net
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
 
-  sensor-sim:
+  # ============================
+  # Sensor Simulator
+  # ============================
+  sensor-simulator:
     build:
       context: .
-      dockerfile: Dockerfile
-    image: local/sensor-sim:latest
-    container_name: sensor-sim
-    depends_on:
-      - mqtt-broker
+    image: local/sensor-simulator:latest
+    container_name: sensor-simulator
+    environment:
+      - MQTT_HOST=mqtt-broker
+      - MQTT_PORT=1883
+      - MQTT_TOPIC=ev/metrics
+      - PUBLISH_INTERVAL=2
+    # depends_on:
+    #   mqtt-broker:
+        # condition: service_healthy
+    restart: unless-stopped
     networks:
       - edge_net
-    restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
 
-  ml_inference:
+  # ============================
+  # ML Inference (Anomaly Detection)
+  # ============================
+  ml-inference:
     image: tensorflow/tensorflow:2.14.0
-    volumes:
-      - ./edge/models:/app/models
-      - ./edge:/app
-    working_dir: /app/models
-    command:  bash -c "pip install scikit-learn joblib numpy paho-mqtt && python /app/models/Machine_learning.py"
-    container_name: ml_inference
-    depends_on:
-      - mqtt-broker
+    container_name: ml-inference
+    environment:
+      - MQTT_HOST=mqtt-broker
+      - MQTT_PORT=1883
+      - MQTT_INPUT_TOPIC=ev/metrics
+      - MQTT_OUTPUT_TOPIC=ev/alerts
+    # depends_on:
+    #   mqtt-broker:
+        # condition: service_healthy
+    restart: unless-stopped
     networks:
       - edge_net
-    restart: unless-stopped
+    command:  bash -c "pip install scikit-learn joblib numpy paho-mqtt && python /app/models/Machine_learning_enhanced.py"
+    volumes:
+      - ./edge/models:/app/models:rw
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
 
 networks:
   edge_net:
     driver: bridge
-

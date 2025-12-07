@@ -1,303 +1,235 @@
-# EV Battery Management System - Docker Deployment
+# EV Battery Management System - Cloud Deployment
 
-Complete containerized stack for real-time EV battery monitoring, data processing, and visualization.
+> ⚠️ **DEMO VERSION** - See [`SECURITY.md`](SECURITY.md) before production
 
-## 📋 System Architecture
+Complete containerized stack for real-time EV battery monitoring with edge-cloud integration.
+
+## 📊 Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                    EV Battery Management Stack              │
-├─────────────────────────────────────────────────────────────┤
-│                                                             │
-│  Kafka (9092)          NiFi (8080)         Spark (8888)   │
-│  ├─ ev_raw             ├─ Consume Kafka   ├─ Processing   │
-│  ├─ ev_processed       ├─ Transform       └─ Analytics    │
-│  └─ ev_alerts          ├─ Route Anomalies                │
-│                        └─ Publish Alerts                  │
-│                                                             │
-│  PostgreSQL (5432)     Redis (6379)       Superset (8088) │
-│  ├─ superset_db        ├─ Caching        ├─ Dashboard    │
-│  └─ battery_metrics    └─ Session Store  └─ Visualization│
-│                                                             │
-└─────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────┐
+│              Edge-Cloud Infrastructure               │
+├──────────────────────────────────────────────────────┤
+│                                                      │
+│  EDGE (docker_deploy/Eage)                          │
+│  ├─ Sensor Simulator (MQTT)                         │
+│  ├─ ML Inference                                    │
+│  └─ Local Processing                                │
+│           ↓ (MQTT Bridge)                           │
+│  BRIDGE (mqtt-kafka-bridge)                         │
+│           ↓                                          │
+│  CLOUD (docker_deploy/Cloud)                        │
+│  ├─ Kafka (Message Broker)                          │
+│  ├─ NiFi (Data Orchestration)                       │
+│  ├─ Spark (Stream Processing)                       │
+│  ├─ PostgreSQL (Data Warehouse)                     │
+│  ├─ Superset (Analytics & Dashboards)               │
+│  └─ Redis (Caching)                                 │
+│                                                      │
+└──────────────────────────────────────────────────────┘
 ```
 
 ## 🚀 Quick Start
 
 ### Prerequisites
-
 - Docker & Docker Compose 3.8+
-- 8GB+ RAM
-- 20GB+ Disk space
-- Windows/Linux/Mac
+- 16GB RAM (minimum)
+- 50GB disk space
+- Ubuntu 20.04+ or Windows 10+ with WSL2
 
 ### Installation
 
 ```bash
-# 1. Clone repository
+# 1. Navigate to Cloud deployment
 cd docker_deploy/Cloud
 
-# 2. Create required directories
-mkdir -p postgres nifi kafka superset spark
+# 2. Create environment file with secure credentials
+cp .env.example .env
+# Edit .env with strong passwords
 
-# 3. Create init files (if not exists)
-# See below: Init Files Section
-
-# 4. Start all services
+# 3. Start all services
 docker-compose up -d
 
-# 5. Wait for services to be healthy
+# 4. Wait for services to be healthy
+sleep 120
 docker-compose ps
 
-# 6. Access services
-# NiFi UI:      http://localhost:8080/nifi
-# Superset UI:  http://localhost:8088 (admin/admin)
-# Kafka:        localhost:9092
-# PostgreSQL:   localhost:5432
-# Spark:        localhost:8888
+# 5. Access services
+# Superset:    http://localhost:8088 (admin/admin by default)
+# NiFi:        http://localhost:8080/nifi
+# Kafka:       localhost:9092
+# PostgreSQL:  localhost:5432
+# Spark UI:    http://localhost:8888
+# Redis:       localhost:6379
 ```
-
-## 🔧 Service Configuration
-
-### Kafka (Message Broker)
-- **Port:** 9092 (PLAINTEXT), 9093 (CONTROLLER)
-- **Topics:**
-  - `ev_raw` — Raw battery sensor data
-  - `ev_processed` — Processed metrics
-  - `ev_alerts` — Anomaly alerts
-- **Mode:** KRaft (no Zookeeper)
-
-### NiFi (Data Flow Orchestrator)
-- **Port:** 8080 (HTTP)
-- **Features:**
-  - Consumes from Kafka `ev_raw`
-  - Transforms & enriches data (JoltTransformJSON)
-  - Extracts fields (EvaluateJsonPath)
-  - Routes anomalies (RouteOnAttribute)
-  - Publishes to `ev_processed` & `ev_alerts`
-- **Flow:** Saved in `conf/flow.xml.gz` (auto-persisted)
-
-### PostgreSQL (Data Warehouse)
-- **Port:** 5432
-- **Databases:**
-  - `superset_db` — Superset metadata
-  - `battery_metrics` — Battery telemetry data
-- **Tables:**
-  - `battery_metrics` — Voltage, temperature, SOC, SOH readings
-  - `battery_faults` — Detected anomalies
-- **User:** superset / superset_pass
-
-### Superset (Visualization)
-- **Port:** 8088
-- **Login:** admin / admin
-- **Features:**
-  - Real-time dashboards
-  - SQL queries
-  - Chart creation
-  - Export reports
-- ** Database:** Connects to `battery_metrics` in PostgreSQL handeling (troubleshooting below)
-  - Caches sessions in Redis  
-  - if it errors like no driver found, ensure PostgreSQL is reachable from Superset container (no module name psycopg2)
-  - then check which python, and which pip inside the superset container, and install psycopg2-binary if missing
-  - if no pip, install pip first:
-    - run apt-get update && apt-get install -y python3-pip
-  - run python -m pip install psycopg2-binary
-  - then check import psycopg2 in python shell inside superset container
-  - if successful, restart superset service
-  - Now be ready to connect to the battery_metrics database
-
-### Spark (Stream Processing)
-- **Port:** 8888 (Master UI)
-- **Port:** 7077 (Master), 8081 (Worker)
-- **Features:**
-  - Real-time analytics
-  - Machine learning models
-  - Batch processing
---- **Jobs:** PySpark scripts in `/opt/spark-apps/`
-  - Example: `battery_processor.py` for processing battery data from Kafka
-  - Ensure Kafka package compatibility with Spark version
-  - Check `docker-compose.yml` for `--packages` argument
-  - Test connectivity with `test_connection_kafka.py`
-  - Adjust resource allocation in `docker-compose.yml` if needed
-  - Monitor via Spark UI
-  - Restart with `docker-compose restart spark-master spark-worker`
-  - Logs: `docker-compose logs -f spark-master` and `docker-compose logs -f spark-worker`
-  - Troubleshoot connectivity issues with Kafka (network, ports, versions)
-  - Validate data processing logic in PySpark scripts
-  - Scale resources based on workload
-  - Ensure proper shutdown to avoid data loss
-  - Regularly update Spark and dependencies for security and performance
-  - Backup important data and configurations
-  - Monitor system resource usage (CPU, memory, disk I/O)
-  - Optimize Spark configurations for performance tuning
-  - Consider using Spark Streaming checkpoints for fault tolerance
-  - Test with sample data before deploying to production
-  - Quickly verify cmd line connectivity to Kafka from Spark container:
-    ```bash
-    docker exec -it spark-master bash
-    spark-submit --packages org.apache.spark:spark-sql-kafka-0-10_2.13:4.0.0 --master local[*] /opt/spark-apps/test_connection_kafka.py
-    ```
-    ```python         
-    # Expected output:  
-    🔄 Initializing Spark session...
-    ✅ Connected to Kafka successfully!
-    ```
-    spark-submit --master local[*] --packages org.apache.spark:spark-sql-kafka-0-10_2.13:4.0.0 /opt/spark-apps/battery_processor.py
-    spark-submit  --master local[*]  --packages org.apache.spark:spark-sql-kafka-0-10_2.13:4.0.0,org.postgresql:postgresql:42.7.1 /opt/spark-apps/store_to_postgres.py
-
-    seq 10000 | while read i; do
-    echo "{\"id\": $i, \"voltage\": $((RANDOM%2+3
-    )), \"temp\": $((RANDOM%30+20)), \"soc\": $((RANDOM%80+10))}" | \
-    kafka-console-producer.sh --broker-list localhost:9092 --topic ev_raw
-    done
-    echo '{"test":"hello-nifi"}' | docker exec -i kafka bash -c "kafka-console-producer.sh --broker-list localhost:9092 --topic ev_raw --property parse.key=true --property key.separator=:" || true
-    bash -c "kafka-console-consumer.sh --bootstrap-server localhost:9092 --topic ev_raw --group nifi-battery-consumer --from-beginning --max-messages 1 --timeout-ms 10000"
-### Redis (Cache & Session Store)
-- **Port:** 6379
-- **Purpose:**
-  - Superset session caching
-  - Temporary data storage
 
 ## 📁 Directory Structure
 
 ```
 Cloud/
-├── docker-compose.yml          # Main compose file
-├── .dockerignore               # Build context exclusions
+├── docker-compose.yml          # Main stack definition
+├── .env                         # Credentials (⚠️ DO NOT COMMIT)
+├── .gitignore                  # Version control exclusions
+├── .dockerignore               # Docker build exclusions
 ├── README.md                   # This file
+├── SECURITY.md                 # Security audit & risks
+├── SECURITY_FIXES.md           # Security implementation
+├── SERVICES.md                 # Service details
+├── TLS_SETUP.md                # HTTPS/TLS configuration
 │
 ├── kafka/
-│   ├── Dockerfile              # Kafka image build
-│   ├── entrypoint.sh           # KRaft initialization
-│   └── server.properties       # Kafka broker config
+│   ├── Dockerfile              # Kafka build
+│   ├── entrypoint.sh           # KRaft mode initialization
+│   └── server.properties       # Broker configuration
 │
 ├── nifi/
-│   ├── Dockerfile              # NiFi image build
-│   ├── init-flow.sh            # Flow initialization
-│   └── conf/                   # NiFi configuration (auto-created)
-│       ├── flow.xml.gz         # Saved data flows
-│       ├── nifi.properties     # NiFi settings
-│       └── logback.xml         # Logging config
+│   ├── Dockerfile              # NiFi build
+│   ├── nifi-dataflow.xml       # Data flow template
+│   └── init-flow.sh            # Flow initialization
 │
 ├── postgres/
-│   ├── 01-init-dbs.sql         # Database creation
+│   ├── 01-init-dbs.sql         # Database setup
 │   ├── 02-init-tables.sh       # Table schema
-│   └── postgresql.conf         # PostgreSQL tuning (optional)
+│   └── postgresql.conf         # PostgreSQL config
 │
 ├── superset/
-│   ├── Dockerfile              # Superset image build
-│   └── entrypoint.sh           # Superset initialization
+│   ├── Dockerfile              # Superset build
+│   ├── superset_config.py      # Configuration
+│   └── entrypoint.sh           # Initialization
 │
-└── spark/
-    ├── Dockerfile              # Spark image build
-    ├── conf/                   # Spark configuration
-    └── apps/                   # PySpark jobs
-        └── battery_analysis.py
+├── spark/
+│   ├── Dockerfile              # Spark build
+│   ├── conf/                   # Spark settings
+│   └── apps/                   # PySpark jobs
+│       ├── battery_processor.py
+│       └── store_to_postgres.py
+│
+├── bridge/
+│   ├── Dockerfile              # Bridge build
+│   ├── mqtt_to_kafka.py        # MQTT → Kafka forwarder
+│   └── requirements.txt        # Python dependencies
+│
+├── nginx/
+│   ├── nginx.conf              # Reverse proxy config
+│   └── .htpasswd               # Authentication
+│
+└── volumes/                    # (Auto-created)
+    ├── postgres-data/
+    ├── kafka-data/
+    ├── redis-data/
+    └── spark-data/
 ```
 
-## 🔌 Init Files
+## 🔌 Data Flow
 
-### postgres/01-init-dbs.sql
-```sql
-CREATE DATABASE superset_db OWNER superset;
-CREATE DATABASE battery_metrics OWNER superset;
-GRANT ALL PRIVILEGES ON DATABASE superset_db TO superset;
-GRANT ALL PRIVILEGES ON DATABASE battery_metrics TO superset;
+### Complete Pipeline
+
+```
+Eage (Edge Devices)
+  └─ Sensor Data (MQTT)
+      └─ ev/metrics topic
+          └─ mqtt-kafka-bridge
+              └─ Kafka ev_raw topic
+                  └─ NiFi ConsumeKafka
+                      ├─ LogAttribute (Debug)
+                      ├─ JoltTransformJSON (Enrich)
+                      ├─ EvaluateJsonPath (Extract)
+                      └─ RouteOnAttribute (Anomaly Detection)
+                          ├─ Normal Data → ev_processed
+                          └─ Alerts → ev_alerts
+                              └─ Spark Stream Processor
+                                  └─ PostgreSQL (battery_metrics)
+                                      └─ Superset Dashboard
 ```
 
-### postgres/02-init-tables.sh
-```bash
-#!/bin/bash
-psql -U superset -d battery_metrics <<EOF
-CREATE TABLE battery_metrics (
-  id SERIAL PRIMARY KEY,
-  voltage DECIMAL(5,2),
-  temperature DECIMAL(5,2),
-  current DECIMAL(7,2),
-  soc DECIMAL(5,2),
-  soh DECIMAL(5,2),
-  timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-CREATE TABLE battery_faults (
-  id SERIAL PRIMARY KEY,
-  fault_type VARCHAR(50),
-  severity VARCHAR(20),
-  description TEXT,
-  metric_id INTEGER REFERENCES battery_metrics(id),
-  detected_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-EOF
-```
+### Message Format
 
-## 📊 Data Flow
-
-### 1. Data Ingestion (Kafka)
-```
-IoT Sensor → Kafka Topic (ev_raw)
+**Input (ev_raw):**
+```json
 {
   "voltage": 3.8,
   "temperature": 35,
+  "current": 50,
   "soc": 75,
   "soh": 95,
   "timestamp": "2025-11-18T02:30:00Z"
 }
 ```
 
-### 2. Data Processing (NiFi)
-```
-ConsumeKafka → LogAttribute → JoltTransformJSON 
-→ EvaluateJsonPath → RouteOnAttribute
-```
-
-### 3. Anomaly Detection
-```
-RouteOnAttribute:
-  - voltage > 4.2V → ALERT
-  - temperature > 50°C → ALERT
-  - soc < 20% → ALERT
-  - soh < 50% → ALERT
-```
-
-### 4. Storage & Visualization
-```
-Normal Data → PostgreSQL (battery_metrics)
-           → Superset Dashboard
-           
-Alerts → Kafka (ev_alerts) → NiFi Logging
+**Output (ev_processed):**
+```json
+{
+  "voltage": 3.8,
+  "temperature": 35,
+  "current": 50,
+  "soc": 75,
+  "soh": 95,
+  "timestamp": "2025-11-18T02:30:00Z",
+  "processing_timestamp": "2025-11-18T02:30:01Z",
+  "is_anomaly": false,
+  "anomaly_type": "NORMAL",
+  "severity": "INFO"
+}
 ```
 
-## 🎯 Common Tasks
+## 🔐 Security
 
-### Start All Services
+### Demo Mode
+- ⚠️ Default credentials (change before production)
+- ⚠️ HTTP only (no HTTPS/TLS)
+- ⚠️ No authentication on APIs
+- ⚠️ All services accessible
+
+### Production Requirements
+- ✅ Use `.env` file with strong credentials
+- ✅ Enable TLS 1.3 on all services
+- ✅ Add reverse proxy with authentication
+- ✅ Implement network segmentation
+- ✅ Enable audit logging
+- ✅ Regular security scanning
+
+**See [`SECURITY.md`](SECURITY.md) & [`SECURITY_FIXES.md`](SECURITY_FIXES.md)**
+
+## 📊 Service Configuration
+
+| Service | Port | Type | Purpose |
+|---------|------|------|---------|
+| Kafka | 9092 | PLAINTEXT | Message broker |
+| NiFi | 8080 | HTTP | Data orchestration |
+| PostgreSQL | 5432 | TCP | Data warehouse |
+| Superset | 8088 | HTTP | Analytics UI |
+| Redis | 6379 | TCP | Caching |
+| Spark Master | 7077 | TCP | Job submission |
+| Spark UI | 8888 | HTTP | Monitoring |
+| Nginx | 80/443 | HTTP/HTTPS | Reverse proxy |
+
+**See [`SERVICES.md`](SERVICES.md) for details**
+
+## 🎯 Common Operations
+
+### Start Services
 ```bash
 docker-compose up -d
-docker-compose logs -f
+docker-compose ps
 ```
 
-### Stop All Services
+### Stop Services
 ```bash
 docker-compose down
 ```
 
-### Clean Volumes (WARNING: Deletes data)
-```bash
-docker-compose down -v
-docker volume prune -f
-```
-
-### View Service Logs
+### View Logs
 ```bash
 # All services
 docker-compose logs -f
 
 # Specific service
+docker-compose logs -f mqtt-kafka-bridge
 docker-compose logs -f nifi
-docker-compose logs -f kafka
-docker-compose logs -f postgres
+docker-compose logs -f spark-master
 ```
 
-### Access Service Shells
+### Access Shells
 ```bash
 # PostgreSQL
 docker exec -it postgres psql -U superset -d battery_metrics
@@ -309,7 +241,7 @@ docker exec -it kafka bash
 docker exec -it nifi bash
 ```
 
-### Create Kafka Topic
+### Create Kafka Topics
 ```bash
 docker exec kafka kafka-topics.sh \
   --bootstrap-server localhost:9092 \
@@ -317,169 +249,177 @@ docker exec kafka kafka-topics.sh \
   --partitions 1 --replication-factor 1 --if-not-exists
 ```
 
-### Publish Test Data to Kafka
+### Send Test Data
 ```bash
 docker exec -i kafka kafka-console-producer.sh \
   --bootstrap-server localhost:9092 \
   --topic ev_raw \
   <<EOF
-{"voltage": 3.8, "temperature": 35, "soc": 75, "soh": 95}
-{"voltage": 4.5, "temperature": 55, "soc": 20, "soh": 45}
+{"voltage": 3.8, "temperature": 35, "soc": 75, "soh": 95, "timestamp": "2025-11-18T02:30:00Z"}
+{"voltage": 4.5, "temperature": 55, "soc": 15, "soh": 45, "timestamp": "2025-11-18T02:35:00Z"}
 EOF
 ```
 
-### Monitor Kafka Messages
+### Monitor Data Flow
 ```bash
+# Kafka consumer
 docker exec kafka kafka-console-consumer.sh \
   --bootstrap-server localhost:9092 \
   --topic ev_processed \
   --from-beginning
-```
 
-### Check Database Tables
-```bash
-# List all tables
-docker exec postgres psql -U superset -d battery_metrics -c "\dt"
-
-# Query metrics
+# PostgreSQL
 docker exec postgres psql -U superset -d battery_metrics -c "SELECT * FROM battery_metrics LIMIT 10;"
 
-# Count records
+# Row count
 docker exec postgres psql -U superset -d battery_metrics -c "SELECT COUNT(*) FROM battery_metrics;"
 ```
 
-### Rebuild Specific Service
+### Clean Rebuild
 ```bash
-docker-compose build --no-cache kafka
-docker-compose up -d kafka
+docker-compose down -v
+docker volume prune -f
+docker-compose build --no-cache
+docker-compose up -d
 ```
 
-### View Service Health
-```bash
-docker-compose ps
+## 🧪 Integration Testing
 
-# Expected output:
-# NAME           STATUS              PORTS
-# kafka          Up (healthy)        9092->9092/tcp
-# nifi           Up (healthy)        8080->8080/tcp
-# postgres       Up (healthy)        5432->5432/tcp
-# superset       Up (healthy)        8088->8088/tcp
-# redis          Up (healthy)        6379->6379/tcp
-# spark-master   Up                  8888->8888/tcp
+### Test 1: MQTT Bridge → Kafka
+```bash
+# Monitor bridge
+docker-compose logs -f mqtt-kafka-bridge
+
+# Send MQTT test (from Eage or external)
+mosquitto_pub -h localhost -p 1883 -t ev/metrics -m \
+  '{"voltage":3.8,"temperature":35,"soc":75,"soh":95,"timestamp":"2025-11-18T02:30:00Z"}'
+
+# Verify in Kafka
+docker exec kafka kafka-console-consumer.sh \
+  --bootstrap-server localhost:9092 \
+  --topic ev_raw \
+  --max-messages 1
 ```
 
-## 🔍 Troubleshooting
-
-### NiFi Not Starting
+### Test 2: NiFi Data Processing
 ```bash
-# Check logs
-docker-compose logs nifi | tail -50
+# Check NiFi web UI
+curl http://localhost:8080/nifi-api/system-diagnostics
 
-# Verify Kafka connectivity
-docker exec nifi nc -zv kafka 9092
-
-# Restart with fresh volumes
-docker-compose down nifi
-docker volume rm nifi-conf nifi-logs || true
-docker-compose up -d nifi
+# Verify processors running
+curl http://localhost:8080/nifi-api/process-groups/root/status
 ```
 
-### PostgreSQL Init Failed
+### Test 3: Spark Processing
 ```bash
-# Verify init files exist
-ls -la postgres/01-init-dbs.sql postgres/02-init-tables.sh
+# Submit test job
+docker exec spark-master spark-submit \
+  --master spark://spark-master:7077 \
+  /opt/spark-apps/battery_processor.py
 
-# Check init script is executable
-chmod +x postgres/02-init-tables.sh
-
-# View initialization logs
-docker-compose logs postgres | grep -i "creating\|error"
+# Monitor
+docker-compose logs -f spark-master
 ```
 
-### Kafka Not Accepting Connections
+### Test 4: PostgreSQL Storage
 ```bash
-# Check Kafka is running
-docker-compose ps kafka
+# Query data
+docker exec postgres psql -U superset -d battery_metrics -c "SELECT COUNT(*) FROM battery_metrics;"
 
-# Verify broker health
-docker exec kafka kafka-broker-api-versions.sh --bootstrap-server localhost:9092
-
-# Check Kafka logs
-docker-compose logs kafka | tail -50
+# Check tables
+docker exec postgres psql -U superset -d battery_metrics -c "\dt"
 ```
 
-### Superset Connection Issues
+### Test 5: Superset Dashboard
 ```bash
-# Verify PostgreSQL is accessible
-docker exec superset psql -U superset -h postgres -d superset_db -c "\dt"
-
-# Restart Superset
-docker-compose restart superset
-sleep 60
-
 # Access UI
-curl http://localhost:8088
+open http://localhost:8088
+
+# Login: admin / admin
+# Create new data source → PostgreSQL
+# Connect: battery_metrics database
+# Create dashboard with battery metrics
 ```
 
 ## 📈 Performance Tuning
 
-### Increase Resource Limits
-Edit `docker-compose.yml`:
-
+### Increase Resources
 ```yaml
 services:
   kafka:
     environment:
       - KAFKA_HEAP_OPTS=-Xmx2G -Xms2G
   
-  nifi:
-    environment:
-      - NIFI_JVM_HEAP_MAX=2G
-      - NIFI_JVM_HEAP_MIN=512m
-  
   spark-master:
     environment:
-      - SPARK_MASTER_HOST=spark-master
+      - SPARK_WORKER_MEMORY=4G
       - SPARK_WORKER_CORES=4
-      - SPARK_WORKER_MEMORY=2G
 ```
 
 ### Database Optimization
 ```bash
-# Run VACUUM on PostgreSQL
+# Run VACUUM
 docker exec postgres psql -U superset -d battery_metrics -c "VACUUM ANALYZE;"
 
 # Create indexes
 docker exec postgres psql -U superset -d battery_metrics -c "CREATE INDEX idx_soc ON battery_metrics(soc);"
 ```
 
-## 🔐 Security Notes
+### Cache Configuration
+```bash
+# Redis memory policy
+docker exec redis redis-cli CONFIG SET maxmemory-policy allkeys-lru
+```
 
-⚠️ **For Production:**
-- Change default passwords in `docker-compose.yml`
-- Use environment variables for secrets
-- Enable TLS/SSL for all services
-- Restrict network access
-- Use secrets management (Docker Secrets / HashiCorp Vault)
-- Enable authentication on Kafka
-- Configure PostgreSQL password authentication
+## 🐛 Troubleshooting
 
-**Development Only:**
-- Default credentials: admin/admin (Superset), superset/superset_pass (PostgreSQL)
-- Disable HTTPS for development (NiFi, Superset)
+| Issue | Solution |
+|-------|----------|
+| Bridge not connecting | Check `MQTT_HOST` & `KAFKA_BROKER` in `.env` |
+| NiFi processors failing | Verify Kafka broker is healthy |
+| PostgreSQL init failed | Check init scripts exist: `postgres/01-init-dbs.sql` |
+| Superset can't connect DB | Verify PostgreSQL is running & accessible |
+| Spark jobs failing | Check logs: `docker-compose logs spark-master` |
+| MQTT messages not arriving | Test bridge: `docker-compose logs mqtt-kafka-bridge` |
+| Memory issues | Increase Docker memory limit |
 
-## 📞 Support
+## 🔄 Integration with Edge (Eage)
+
+```bash
+# Terminal 1: Start Cloud
+cd docker_deploy/Cloud
+docker-compose up -d
+sleep 60
+
+# Terminal 2: Start Edge (pointing to Cloud bridge)
+cd docker_deploy/Eage
+docker-compose -f docker-compose.yml -f docker-compose.cloud-link.yml up -d
+
+# Terminal 3: Monitor data flow
+docker-compose logs -f mqtt-kafka-bridge
+```
+
+## 📚 Documentation
+
+- [`SECURITY.md`](SECURITY.md) — Security audit & risks
+- [`SECURITY_FIXES.md`](SECURITY_FIXES.md) — Security implementation
+- [`SERVICES.md`](SERVICES.md) — Service details & ports
+- [`TLS_SETUP.md`](TLS_SETUP.md) — HTTPS/TLS configuration
+
+## 🤝 Support
 
 For issues:
 1. Check logs: `docker-compose logs [service]`
-2. Verify service health: `docker-compose ps`
+2. Verify health: `docker-compose ps`
 3. Test connectivity: `docker exec [service] nc -zv [host] [port]`
-4. Review init scripts: `postgres/01-init-dbs.sql`, `postgres/02-init-tables.sh`
+4. Review docs: See files above
 
 ## 📝 License
 
-Part of MSc Thesis - EV Battery Management System Monitoring
+MSc Thesis - EV Battery Management System Monitoring
 
 ---
 
-**Last Updated:** November 18, 2025
+**Version:** 1.0 (Demo)  
+**Last Updated:** December 5, 2025  
+**Status:** ⚠️ NOT PRODUCTION READY
