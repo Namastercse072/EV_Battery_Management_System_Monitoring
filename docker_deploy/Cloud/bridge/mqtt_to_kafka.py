@@ -29,7 +29,7 @@ MQTT_HOST = os.getenv("MQTT_HOST", "mqtt-broker")
 MQTT_PORT = int(os.getenv("MQTT_PORT", 1883))
 MQTT_TOPICS = ["ev/metrics", "ev/status", "ev/alerts"]
 
-KAFKA_BROKER = os.getenv("KAFKA_BROKER", "kafka:9092")
+KAFKA_BROKER = os.getenv("KAFKA_BROKER", "kafka-broker-1:29092")
 KAFKA_TOPIC = "ev_raw"
 
 # ============================

@@ -1,0 +1,654 @@
+# ========================================
+# Enhanced Cloud Architecture
+# ========================================
+# Features:
+# - Kafka cluster (3+ brokers for HA)
+# - PostgreSQL with replication
+# - Load balancer (Nginx)
+# - Multi-instance Spark workers
+# - Service mesh ready (Consul)
+
+services:
+  # ============================
+  # Service Discovery (Consul)
+  # ============================
+  # consul-server:
+  #   image: consul:1.17
+  #   container_name: consul-server
+  #   ports:
+  #     - "8500:8500"
+  #     - "8600:8600/udp"
+  #   environment:
+  #     - CONSUL_BIND_INTERFACE=eth0
+  #   command: agent -server -ui -node=server-1 -bootstrap-expect=1 -client=0.0.0.0
+  #   volumes:
+  #     - consul-data:/consul/data
+  #   healthcheck:
+  #     test: ["CMD", "consul", "version"]
+  #     interval: 10s
+  #     timeout: 5s
+  #     retries: 5
+  #   restart: unless-stopped
+  #   networks:
+  #     - cloud_net
+  #   logging:
+  #     driver: "json-file"
+  #     options:
+  #       max-size: "10m"
+  #       max-file: "3"
+
+  # ============================
+  # Load Balancer (Nginx)
+  # ============================
+  nginx-lb:
+    image: nginx:1.25-alpine
+    container_name: nginx-loadbalancer
+    ports:
+      - "80:80"
+      - "443:443"
+      # - "1883:1883"
+      - "29092:29092"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/conf.d:/etc/nginx/conf.d:ro
+      - ./nginx/ssl:/etc/nginx/ssl:ro
+    depends_on:
+      - kafka-broker-1
+      # - nifi
+      - superset
+    healthcheck:
+      test: ["CMD", "nginx", "-t"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - cloud_net
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ============================
+  # Kafka Broker 1 (KRaft Mode)
+  # ============================
+  kafka-broker-1:
+    build:
+      context: ./kafka
+    image: local/kafka:3.8.0
+    container_name: kafka-broker-1
+    ports:
+      - "9092:9092"
+      - "9093:9093"
+    environment:
+      - KAFKA_CLUSTER_ID=xB7zK9pL5mN2qR8vT4wX9Y
+      - KAFKA_NODE_ID=1
+      - KAFKA_PROCESS_ROLES=broker,controller
+      - KAFKA_LISTENERS=PLAINTEXT://kafka-broker-1:29092,CONTROLLER://kafka-broker-1:29093,EXTERNAL://0.0.0.0:9092
+      - KAFKA_ADVERTISED_LISTENERS=PLAINTEXT://kafka-broker-1:29092,EXTERNAL://kafka-broker-1:9092
+      - KAFKA_LISTENER_SECURITY_PROTOCOL_MAP=CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,EXTERNAL:PLAINTEXT
+      - KAFKA_INTER_BROKER_LISTENER_NAME=PLAINTEXT
+      - KAFKA_CONTROLLER_LISTENER_NAMES=CONTROLLER
+      - KAFKA_CONTROLLER_QUORUM_VOTERS=1@kafka-broker-1:29093,2@kafka-broker-2:29093,3@kafka-broker-3:29093
+      - KAFKA_LOG_RETENTION_HOURS=168
+      - KAFKA_LOG_RETENTION_BYTES=1073741824
+      - KAFKA_AUTO_CREATE_TOPICS_ENABLE=true
+      - KAFKA_DEFAULT_REPLICATION_FACTOR=3
+      - KAFKA_MIN_INSYNC_REPLICAS=2
+    volumes:
+      - kafka-broker-1-data:/var/lib/kafka/data
+      - ./kafka/kraft:/tmp/kraft
+    healthcheck:
+      test: ["CMD", "kafka-broker-api-versions.sh", "--bootstrap-server", "localhost:9092"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 45s
+    restart: unless-stopped
+    networks:
+      - cloud_net
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ============================
+  # Kafka Broker 2
+  # ============================
+  kafka-broker-2:
+    build:
+      context: ./kafka
+    image: local/kafka:3.8.0
+    container_name: kafka-broker-2
+    ports:
+      - "9094:9092"
+      - "9095:9093"
+    environment:
+      - KAFKA_CLUSTER_ID=xB7zK9pL5mN2qR8vT4wX9Y
+      - KAFKA_NODE_ID=2
+      - KAFKA_PROCESS_ROLES=broker,controller
+      - KAFKA_LISTENERS=PLAINTEXT://kafka-broker-2:29092,CONTROLLER://kafka-broker-2:29093,EXTERNAL://0.0.0.0:9092
+      - KAFKA_ADVERTISED_LISTENERS=PLAINTEXT://kafka-broker-2:29092,EXTERNAL://kafka-broker-2:9092
+      - KAFKA_LISTENER_SECURITY_PROTOCOL_MAP=CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,EXTERNAL:PLAINTEXT
+      - KAFKA_INTER_BROKER_LISTENER_NAME=PLAINTEXT
+      - KAFKA_CONTROLLER_LISTENER_NAMES=CONTROLLER
+      - KAFKA_CONTROLLER_QUORUM_VOTERS=1@kafka-broker-1:29093,2@kafka-broker-2:29093,3@kafka-broker-3:29093
+      - KAFKA_LOG_RETENTION_HOURS=168
+      - KAFKA_LOG_RETENTION_BYTES=1073741824
+      - KAFKA_AUTO_CREATE_TOPICS_ENABLE=true
+      - KAFKA_DEFAULT_REPLICATION_FACTOR=3
+      - KAFKA_MIN_INSYNC_REPLICAS=2
+    volumes:
+      - kafka-broker-2-data:/var/lib/kafka/data
+      - ./kafka/kraft:/tmp/kraft
+    healthcheck:
+      test: ["CMD", "kafka-broker-api-versions.sh", "--bootstrap-server", "localhost:9092"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 45s
+    restart: unless-stopped
+    networks:
+      - cloud_net
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ============================
+  # Kafka Broker 3
+  # ============================
+  kafka-broker-3:
+    build:
+      context: ./kafka
+    image: local/kafka:3.8.0
+    container_name: kafka-broker-3
+    ports:
+      - "9096:9092"
+      - "9097:9093"
+    environment:
+      - KAFKA_CLUSTER_ID=xB7zK9pL5mN2qR8vT4wX9Y
+      - KAFKA_NODE_ID=3
+      - KAFKA_PROCESS_ROLES=broker,controller
+      - KAFKA_LISTENERS=PLAINTEXT://kafka-broker-3:29092,CONTROLLER://kafka-broker-3:29093,EXTERNAL://0.0.0.0:9092
+      - KAFKA_ADVERTISED_LISTENERS=PLAINTEXT://kafka-broker-3:29092,EXTERNAL://kafka-broker-3:9092
+      - KAFKA_LISTENER_SECURITY_PROTOCOL_MAP=CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,EXTERNAL:PLAINTEXT
+      - KAFKA_INTER_BROKER_LISTENER_NAME=PLAINTEXT
+      - KAFKA_CONTROLLER_LISTENER_NAMES=CONTROLLER
+      - KAFKA_CONTROLLER_QUORUM_VOTERS=1@kafka-broker-1:29093,2@kafka-broker-2:29093,3@kafka-broker-3:29093
+      - KAFKA_LOG_RETENTION_HOURS=168
+      - KAFKA_LOG_RETENTION_BYTES=1073741824
+      - KAFKA_AUTO_CREATE_TOPICS_ENABLE=true
+      - KAFKA_DEFAULT_REPLICATION_FACTOR=3
+      - KAFKA_MIN_INSYNC_REPLICAS=2
+    volumes:
+      - kafka-broker-3-data:/var/lib/kafka/data
+      - ./kafka/kraft:/tmp/kraft
+    healthcheck:
+      test: ["CMD", "kafka-broker-api-versions.sh", "--bootstrap-server", "localhost:9092"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 45s
+    restart: unless-stopped
+    networks:
+      - cloud_net
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ============================
+  # Kafka Topic Initializer
+  # ============================
+  kafka-init:
+    build:
+      context: ./kafka
+    image: local/kafka:3.8.0
+    container_name: kafka-init
+    entrypoint: /bin/bash
+    command: -c "sleep 15 && kafka-topics.sh --create --bootstrap-server kafka-broker-1:29092 --topic ev_raw --partitions 3 --replication-factor 3 --if-not-exists --config min.insync.replicas=2 && kafka-topics.sh --create --bootstrap-server kafka-broker-1:29092 --topic ev_alerts --partitions 3 --replication-factor 3 --if-not-exists --config min.insync.replicas=2 && kafka-topics.sh --create --bootstrap-server kafka-broker-1:29092 --topic ev_alerts_aggregated --partitions 3 --replication-factor 3 --if-not-exists --config min.insync.replicas=2 && echo '✅ Topics created successfully'"
+    depends_on:
+      kafka-broker-1:
+        condition: service_healthy
+      kafka-broker-2:
+        condition: service_healthy
+      kafka-broker-3:
+        condition: service_healthy
+    networks:
+      - cloud_net
+    restart: "no"
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ============================
+  # MQTT to Kafka Bridge
+  # ============================
+  mqtt-kafka-bridge:
+    build:
+      context: ./bridge
+    image: local/mqtt-kafka-bridge:latest
+    container_name: mqtt-kafka-bridge
+    ports:
+      - "1884:1883"
+      - "9002:9001"
+    environment:
+      - MQTT_HOST=${EDGE_HOST:-mqtt-broker}
+      - MQTT_PORT=1883
+      - KAFKA_BROKER=kafka-broker-1:29092,kafka-broker-2:29092,kafka-broker-3:29092
+      - TOPIC_MAP={"ev/metrics":"ev_raw","ev/alerts":"ev_alerts","ev/alerts/aggregated":"ev_alerts_aggregated"}
+      - MQTT_QOS=1
+      - BATCH_SIZE=10
+      - BATCH_TIMEOUT=5
+    depends_on:
+      kafka-broker-1:
+        condition: service_healthy
+      kafka-broker-2:
+        condition: service_healthy
+      kafka-broker-3:
+        condition: service_healthy
+    networks:
+      - cloud_net
+    volumes:
+      - ./bridge/logs:/app/logs
+    restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ============================
+  # NiFi (Data Flow Orchestration)
+  # ============================
+  # nifi:
+  #   image: apache/nifi:1.25.0
+  #   container_name: nifi
+  #   ports:
+  #     - "8080:8080"
+  #   volumes:
+  #     - nifi-conf:/opt/nifi/nifi-current/conf
+  #     - nifi-logs:/opt/nifi/nifi-current/logs
+  #     - ./nifi/nifi-dataflow.xml:/opt/nifi/nifi-current/dataflow.xml:ro
+  #   healthcheck:
+  #     test: ["CMD", "curl", "-s", "-o", "/dev/null", "-w", "%{http_code}", "http://localhost:8080/nifi-api/system-diagnostics"]
+  #     interval: 15s
+  #     timeout: 10s
+  #     retries: 5
+  #     start_period: 60s
+  #   restart: unless-stopped
+  #   networks:
+  #     - cloud_net
+  #   depends_on:
+  #     kafka-broker-1:
+  #       condition: service_healthy
+  #     kafka-broker-2:
+  #       condition: service_healthy
+  #     kafka-broker-3:
+  #       condition: service_healthy
+  #   logging:
+  #     driver: "json-file"
+  #     options:
+  #       max-size: "10m"
+  #       max-file: "3"
+
+  # ============================
+  # PostgreSQL Primary (Write)
+  # ============================
+  postgres-primary:
+    image: postgres:15-alpine
+    container_name: postgres-primary
+    environment:
+      - POSTGRES_USER=superset
+      - POSTGRES_PASSWORD=superset_pass
+      # - POSTGRES_INITDB_ARGS=-c wal_level=replica -c max_wal_senders=3 -c max_replication_slots=3
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-primary-data:/var/lib/postgresql/data
+      - ./postgres_data/01-init-dbs.sql:/docker-entrypoint-initdb.d/01-init-dbs.sql
+      - ./postgres_data/02-init-tables.sh:/docker-entrypoint-initdb.d/02-init-tables.sh
+      - ./postgres_data/postgresql.conf:/etc/postgresql/postgresql.conf:ro
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "superset"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - cloud_net
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ============================
+  # PostgreSQL Replica (Read-Only)
+  # ============================
+  postgres-replica:
+    image: postgres:15-alpine
+    container_name: postgres-replica
+    environment:
+      - POSTGRES_USER=superset
+      - POSTGRES_PASSWORD=superset_pass
+      - PGUSER=superset
+    ports:
+      - "5433:5432"
+    command: >
+      bash -c "
+      pg_basebackup -h postgres-primary -D /var/lib/postgresql/data -U superset -v -W &&
+      touch /var/lib/postgresql/data/standby.signal &&
+      postgres
+      "
+    volumes:
+      - postgres-replica-data:/var/lib/postgresql/data
+    depends_on:
+      postgres-primary:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "superset"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - cloud_net
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ============================
+  # Redis (Cache & Session Store)
+  # ============================
+  redis:
+    image: redis:7-alpine
+    container_name: redis
+    ports:
+      - "6379:6379"
+    command: redis-server --appendonly yes --requirepass redis_secure_pass
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - cloud_net
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ============================
+  # Superset (Analytics & Dashboards)
+  # ============================
+  superset:
+    build:
+      context: ./superset
+      dockerfile: Dockerfile
+    image: local/superset:latest
+    container_name: superset
+    ports:
+      - "8088:8088"
+    environment:
+      - SUPERSET_SECRET_KEY=${SUPERSET_SECRET_KEY:-mysecret_change_me}
+      - SUPERSET_LOAD_EXAMPLES=no
+      - DATABASE_USER=superset
+      - DATABASE_PASSWORD=superset_pass
+      - DATABASE_DB=superset_db
+      - DATABASE_PORT=5432
+      - DATABASE_DIALECT=postgresql
+      - DATABASE_HOST=postgres-primary
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_PASSWORD=redis_secure_pass
+      - CACHE_CONFIG={"CACHE_TYPE":"RedisCache","CACHE_DEFAULT_TIMEOUT":300,"CACHE_KEY_PREFIX":"superset_","CACHE_REDIS_URL":"redis://:redis_secure_pass@redis:6379/0"}
+      - DATA_CACHE_CONFIG={"CACHE_TYPE":"RedisCache","CACHE_DEFAULT_TIMEOUT":300,"CACHE_KEY_PREFIX":"data_","CACHE_REDIS_URL":"redis://:redis_secure_pass@redis:6379/1"}
+      - SQLALCHEMY_DATABASE_URI=postgresql://superset:superset_pass@postgres-primary:5432/superset_db
+    volumes:
+      - superset-config:/home/superset/.superset
+      - superset-logs:/var/log/superset
+      - ./superset_home:/app/superset_home
+    depends_on:
+      postgres-primary:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: bash -c "
+       superset db upgrade && superset fab create-admin --username admin --firstname Admin --lastname User --email admin@superset.local --password admin 2>/dev/null || true && gunicorn -w 4 -b 0.0.0.0:8088 --timeout 120 'superset.app:create_app()'"
+    healthcheck:
+      test: ["CMD", "curl", "-s", "-o", "/dev/null", "-w", "%{http_code}", "http://localhost:8088/health"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    restart: unless-stopped
+    networks:
+      - cloud_net
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ============================
+  # Spark Master
+  # ============================
+  spark-master:
+    build:
+      context: ./spark-apps
+    image: local/spark:4.0.0
+    container_name: spark-master
+    command: >
+      /bin/bash -c "
+      spark-class org.apache.spark.deploy.master.Master
+      --host spark-master
+      --port 7077
+      --webui-port 8080
+      "
+    ports:
+      - "8888:8080"
+      - "7077:7077"
+    environment:
+      - SPARK_MODE=master
+      - SPARK_RPC_AUTHENTICATION_ENABLED=no
+      - SPARK_RPC_ENCRYPTION_ENABLED=no
+      - SPARK_LOCAL_STORAGE_ENCRYPTION_ENABLED=no
+      - SPARK_SSL_ENABLED=no
+    volumes:
+      - ./spark-apps:/opt/spark-apps
+      - spark-data:/opt/spark-data
+      - spark-logs:/opt/spark/logs
+    healthcheck:
+      test: ["CMD", "curl", "-s", "-o", "/dev/null", "-w", "%{http_code}", "http://localhost:8080"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    restart: unless-stopped
+    networks:
+      - cloud_net
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ============================
+  # Spark Job Executor
+  # ============================
+  spark-app:
+    build:
+      context: ./spark-apps
+    image: local/spark:4.0.0
+    container_name: spark-app
+    command: >
+      /bin/bash -c "
+      sleep 15 &&
+      spark-submit
+      --master spark://spark-master:7077
+      --deploy-mode client
+      --driver-memory 1g
+      --executor-memory 2g
+      --executor-cores 2
+      --total-executor-cores 4
+      --packages org.apache.spark:spark-sql-kafka-0-10_2.13:4.0.0
+      /opt/spark-apps/battery_processor.py
+      "
+    depends_on:
+      spark-master:
+        condition: service_healthy
+      kafka-broker-1:
+        condition: service_healthy
+      kafka-init:
+        condition: service_completed_successfully
+      spark-worker-1:
+        condition: service_healthy
+      spark-worker-2:
+        condition: service_healthy
+    environment:
+      - KAFKA_BOOTSTRAP_SERVERS=kafka-broker-1:9092
+    volumes:
+      - ./spark-apps:/opt/spark-apps
+      - spark-data:/opt/spark-data
+    restart: on-failure
+    networks:
+      - cloud_net
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ============================
+  # Spark Worker 1
+  # ============================
+  spark-worker-1:
+    build:
+      context: ./spark-apps
+    image: local/spark:4.0.0
+    container_name: spark-worker-1
+    command: >
+      /bin/bash -c "
+      spark-class org.apache.spark.deploy.worker.Worker
+      spark://spark-master:7077
+      --host spark-worker-1
+      --port 7078
+      --webui-port 8081
+      --cores 2
+      --memory 2G
+      "
+    ports:
+      - "8881:8081"
+    environment:
+      - SPARK_WORKER_CORES=2
+      - SPARK_WORKER_MEMORY=2G
+      - SPARK_WORKER_PORT=7078
+      - SPARK_WORKER_WEBUI_PORT=8081
+    volumes:
+      - spark-worker-1-data:/opt/spark-data
+      - spark-logs:/opt/spark/logs
+    depends_on:
+      spark-master:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-s", "-o", "/dev/null", "-w", "%{http_code}", "http://localhost:8081"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    restart: unless-stopped
+    networks:
+      - cloud_net
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ============================
+  # Spark Worker 2
+  # ============================
+  spark-worker-2:
+    build:
+      context: ./spark-apps
+    image: local/spark:4.0.0
+    container_name: spark-worker-2
+    command: >
+      /bin/bash -c "
+      spark-class org.apache.spark.deploy.worker.Worker
+      spark://spark-master:7077
+      --host spark-worker-2
+      --port 7078
+      --webui-port 8082
+      --cores 2
+      --memory 2G
+      "
+    ports:
+      - "8882:8082"
+    environment:
+      - SPARK_WORKER_CORES=2
+      - SPARK_WORKER_MEMORY=2G
+      - SPARK_WORKER_PORT=7079
+      - SPARK_WORKER_WEBUI_PORT=8082
+    volumes:
+      - spark-worker-2-data:/opt/spark-data
+      - spark-logs:/opt/spark/logs
+    depends_on:
+      spark-master:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-s", "-o", "/dev/null", "-w", "%{http_code}", "http://localhost:8082"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    restart: unless-stopped
+    networks:
+      - cloud_net
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+# ============================
+# Named Volumes
+# ============================
+volumes:
+  kafka-broker-1-data:
+  kafka-broker-2-data:
+  kafka-broker-3-data:
+  postgres-primary-data:
+  postgres-replica-data:
+  redis-data:
+  nifi-conf:
+  nifi-logs:
+  superset-config:
+  superset-logs:
+  superset-home:
+  spark-data:
+  spark-logs:
+  spark-worker-1-data:
+  spark-worker-2-data:
+  consul-data:
+
+# ============================
+# Networks
+# ============================
+networks:
+  cloud_net:
+    driver: bridge

@@ -6,7 +6,7 @@ ENV KAFKA_VERSION=3.8.0 \
     PATH="$PATH:/opt/kafka/bin"
 
 RUN apt-get update -qq && \
-    apt-get install -y --no-install-recommends curl jq ca-certificates && \
+    apt-get install -y --no-install-recommends curl jq ca-certificates gettext-base && \
     rm -rf /var/lib/apt/lists/*
 
 # safer download: save to temp file, fail on HTTP errors, and verify before extracting
@@ -24,7 +24,11 @@ RUN mkdir -p /var/lib/kafka/data
 
 COPY entrypoint.sh /entrypoint.sh
 COPY server.properties /opt/kafka/config/server.properties
-RUN chmod +x /entrypoint.sh
+RUN chmod +x /entrypoint.sh && chmod +x /opt/kafka/bin/*.sh
 
 EXPOSE 9092 9093
+
+HEALTHCHECK --interval=10s --timeout=5s --retries=5 --start-period=45s \
+    CMD kafka-broker-api-versions.sh --bootstrap-server localhost:9092
+
 CMD ["/entrypoint.sh"]

@@ -1,0 +1,269 @@
+# ========================================
+# Multi-Node Edge Architecture (2+ Nodes)
+# ========================================
+# This compose file supports running multiple edge nodes
+# Each node can be deployed on separate physical hardware
+# Central coordination via etcd for service discovery
+
+services:
+  # ============================
+  # Service Discovery (etcd)
+  # ============================
+  # Single etcd instance for cluster coordination
+  # In production, deploy etcd cluster (3, 5, 7 nodes)
+  etcd:
+    image: quay.io/coreos/etcd:v3.5.13
+    container_name: etcd-discovery
+    ports:
+      - "2379:2379"
+      - "2380:2380"
+    environment:
+      - ETCD_NAME=etcd-node
+      - ETCD_INITIAL_ADVERTISE_PEER_URLS=http://etcd:2380
+      - ETCD_LISTEN_PEER_URLS=http://0.0.0.0:2380
+      - ETCD_LISTEN_CLIENT_URLS=http://0.0.0.0:2379
+      - ETCD_ADVERTISE_CLIENT_URLS=http://etcd:2379
+      - ETCD_INITIAL_CLUSTER=etcd-node=http://etcd:2380
+      - ETCD_INITIAL_CLUSTER_STATE=new
+    volumes:
+      - etcd-data:/etcd-data
+    healthcheck:
+      test: ["CMD", "etcdctl", "--endpoints=http://localhost:2379", "endpoint", "health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - edge_net
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ============================
+  # MQTT Broker (Mosquitto)
+  # Central for all nodes
+  # ============================
+  mqtt-broker:
+    image: eclipse-mosquitto:2.0
+    container_name: mqtt-broker-central
+    ports:
+      - "0.0.0.0:1883:1883"
+      - "0.0.0.0:9001:9001"
+    volumes:
+      - ./mosquitto/config/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+      - ./mosquitto/data:/mosquitto/data
+      - ./mosquitto/log:/mosquitto/log
+    healthcheck:
+      test: ["CMD", "mosquitto_sub", "-h", "localhost", "-t", "test", "-C", "1", "-i", "healthcheck"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    restart: unless-stopped
+    networks:
+      - edge_net
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    environment:
+      - EDGE_HOST=mqtt-broker-central
+
+  # ============================
+  # Node 1: Sensor Simulator
+  # ============================
+  sensor-simulator-node1:
+    build:
+      context: .
+    image: local/sensor-simulator:latest
+    container_name: sensor-simulator-node1
+    environment:
+      - MQTT_HOST=mqtt-broker-central
+      - MQTT_PORT=1883
+      - MQTT_TOPIC=ev/metrics/node1
+      - NODE_ID=node1
+      - PUBLISH_INTERVAL=2
+      - ETCD_HOST=etcd
+      - ETCD_PORT=2379
+      - CLUSTER_ENABLED=true
+    restart: unless-stopped
+    # depends_on:
+    #   mqtt-broker:
+    #     condition: service_healthy
+    #   etcd:
+    #     condition: service_healthy
+    networks:
+      - edge_net
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ============================
+  # Node 2: Sensor Simulator
+  # ============================
+  sensor-simulator-node2:
+    build:
+      context: .
+    image: local/sensor-simulator:latest
+    container_name: sensor-simulator-node2
+    environment:
+      - MQTT_HOST=mqtt-broker-central
+      - MQTT_PORT=1883
+      - MQTT_TOPIC=ev/metrics/node2
+      - NODE_ID=node2
+      - PUBLISH_INTERVAL=2
+      - ETCD_HOST=etcd
+      - ETCD_PORT=2379
+      - CLUSTER_ENABLED=true
+    restart: unless-stopped
+    # depends_on:
+    #   mqtt-broker:
+    #     condition: service_healthy
+    #   etcd:
+    #     condition: service_healthy
+    networks:
+      - edge_net
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ============================
+  # Node 1: ML Inference (Anomaly Detection)
+  # ============================
+  ml-inference-node1:
+    image: tensorflow/tensorflow:2.14.0
+    container_name: ml-inference-node1
+    environment:
+      - MQTT_HOST=mqtt-broker-central
+      - MQTT_PORT=1883
+      - MQTT_INPUT_TOPIC=ev/metrics/node1
+      - MQTT_OUTPUT_TOPIC=ev/alerts/node1
+      - NODE_ID=node1
+      - ETCD_HOST=etcd
+      - ETCD_PORT=2379
+      - CLUSTER_ENABLED=true
+    restart: unless-stopped
+    # depends_on:
+    #   mqtt-broker:
+    #     condition: service_healthy
+    #   etcd:
+    #     condition: service_healthy
+    networks:
+      - edge_net
+    command: bash -c "pip install scikit-learn joblib numpy paho-mqtt zstandard && python /app/models/Machine_learning_enhanced.py"
+    volumes:
+      - ./edge/models:/app/models:rw
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ============================
+  # Node 2: ML Inference (Anomaly Detection)
+  # ============================
+  ml-inference-node2:
+    image: tensorflow/tensorflow:2.14.0
+    container_name: ml-inference-node2
+    environment:
+      - MQTT_HOST=mqtt-broker-central
+      - MQTT_PORT=1883
+      - MQTT_INPUT_TOPIC=ev/metrics/node2
+      - MQTT_OUTPUT_TOPIC=ev/alerts/node2
+      - NODE_ID=node2
+      - ETCD_HOST=etcd
+      - ETCD_PORT=2379
+      - CLUSTER_ENABLED=true
+    restart: unless-stopped
+    # depends_on:
+    #   mqtt-broker:
+    #     condition: service_healthy
+    #   etcd:
+    #     condition: service_healthy
+    networks:
+      - edge_net
+    command: bash -c "pip install scikit-learn joblib numpy paho-mqtt zstandard && python /app/models/Machine_learning_enhanced.py"
+    volumes:
+      - ./edge/models:/app/models:rw
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ============================
+  # Aggregator Service
+  # Consolidates alerts from all nodes
+  # ============================
+  alert-aggregator:
+    image: local/sensor-simulator:latest
+    container_name: alert-aggregator
+    environment:
+      - MQTT_HOST=mqtt-broker-central
+      - MQTT_PORT=1883
+      - MQTT_INPUT_TOPICS=ev/alerts/node1,ev/alerts/node2
+      - MQTT_OUTPUT_TOPIC=ev/alerts/aggregated
+      - NODE_ID=aggregator
+      - ETCD_HOST=etcd
+      - ETCD_PORT=2379
+      - CLUSTER_ENABLED=true
+    restart: unless-stopped
+    # depends_on:
+    #   mqtt-broker:
+    #     condition: service_healthy
+    #   etcd:
+    #     condition: service_healthy
+    networks:
+      - edge_net
+    command: bash -c "pip install paho-mqtt python-etcd && python /app/aggregator.py"
+    volumes:
+      - ./edge/aggregator:/app:rw
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ============================
+  # Node Health Monitor
+  # Monitors node status and registers with etcd
+  # ============================
+  node-monitor:
+    image: local/sensor-simulator:latest
+    container_name: node-monitor
+    environment:
+      - ETCD_HOST=etcd
+      - ETCD_PORT=2379
+      - MQTT_HOST=mqtt-broker-central
+      - MQTT_PORT=1883
+      - CHECK_INTERVAL=5
+    restart: unless-stopped
+    # depends_on:
+    #   etcd:
+    #     condition: service_healthy
+    #   mqtt-broker:
+    #     condition: service_healthy
+    networks:
+      - edge_net
+    command: bash -c "pip install paho-mqtt python-etcd && python /app/monitor.py"
+    volumes:
+      - ./edge/monitor:/app:rw
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+networks:
+  edge_net:
+    driver: bridge
+
+volumes:
+  etcd-data:

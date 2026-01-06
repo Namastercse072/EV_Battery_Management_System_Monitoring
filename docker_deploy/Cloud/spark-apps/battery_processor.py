@@ -12,28 +12,35 @@ try:
     
     spark = SparkSession.builder \
         .appName("EVBatteryProcessor") \
-        .config("spark.jars.packages", "org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.1") \
+        .master("spark://spark-master:7077") \
+        .config("spark.jars.packages", "org.apache.spark:spark-sql-kafka-0-10_2.13:4.0.0") \
         .config("spark.sql.streaming.schemaInference", "true") \
         .config("spark.sql.adaptive.enabled", "true") \
-        .config("spark.sql.shuffle.partitions", "8")  \
-        .config("spark.default.parallelism", "8") \
+        .config("spark.sql.shuffle.partitions", "4")  \
+        .config("spark.default.parallelism", "4") \
         .config("spark.streaming.backpressure.enabled", "true")  \
-        .config("spark.streaming.kafka.maxRatePerPartition", "5000") \
-        .config("spark.executor.memory", "4g") \
-        .config("spark.driver.memory", "2g") \
+        .config("spark.streaming.kafka.maxRatePerPartition", "2000") \
+        .config("spark.executor.memory", "2g") \
+        .config("spark.executor.cores", "2") \
+        .config("spark.driver.memory", "1g") \
         .config("spark.memory.fraction", "0.7") \
         .config("spark.sql.streaming.statefulOperator.checkCorrectness.enabled", "false") \
         .config("spark.sql.streaming.forceDeleteTempCheckpointLocation", "true") \
+        .config("spark.network.timeout", "120s") \
+        .config("spark.executor.heartbeatInterval", "60s") \
+        .config("spark.sql.streaming.continuous.epochIntervalMs", "1000") \
         .getOrCreate()
-    # tunning
-    spark.conf.set("spark.sql.shuffle.partitions", "10")
+    # tuning
+    spark.conf.set("spark.sql.shuffle.partitions", "4")
     spark.conf.set("spark.streaming.stopGracefullyOnShutdown", "true")
     spark.conf.set("spark.sql.streaming.forceDeleteTempCheckpointLocation", "true")
     
-    spark.sparkContext.setLogLevel("WARN")
+    spark.sparkContext.setLogLevel("INFO")
     print("✓ SparkSession created successfully")
     print(f"  Spark version: {spark.version}")
-    print(f"  Master: spark://spark-master:7077\n")
+    print(f"  Master: spark://spark-master:7077")
+    print(f"  Executors: 2")
+    print(f"  Executor Memory: 2g\n")
     
     # ============================
     # 1. Connect to Kafka (ev_raw)
@@ -43,20 +50,27 @@ try:
     kafka_broker = "kafka:9092"
     input_topic = "ev_raw"
     
+    print(f"  Attempting connection to {kafka_broker}...")
+    time.sleep(5)  # Allow Kafka time to be ready
     df_kafka = spark.readStream \
         .format("kafka") \
         .option("kafka.bootstrap.servers", kafka_broker) \
         .option("subscribe", input_topic) \
         .option("startingOffsets", "latest") \
-        .option("failOnDataLoss", "true") \
-        .option("maxOffsetsPerTrigger", "10000") \
-        .option("fetch.min.bytes", "50000") \
+        .option("failOnDataLoss", "false") \
+        .option("maxOffsetsPerTrigger", "5000") \
+        .option("fetch.min.bytes", "1024") \
         .option("fetch.max.bytes", "52428800") \
-        .option("max.poll.records", "1000") \
+        .option("max.poll.records", "500") \
+        .option("session.timeout.ms", "30000") \
+        .option("heartbeat.interval.ms", "10000") \
+        .option("request.timeout.ms", "40000") \
         .load()
     
     print(f"✓ Connected to Kafka broker: {kafka_broker}")
-    print(f"✓ Consuming from topic: {input_topic}\n")
+    print(f"✓ Consuming from topic: {input_topic}")
+    print(f"  Max records per trigger: 5000")
+    print(f"  Starting from latest offsets\n")
     
     # ============================
     # 2. Parse JSON from Kafka

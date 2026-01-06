@@ -27,6 +27,14 @@ from typing import Dict, Any, Optional, Tuple, List
 import socket
 import warnings
 
+try:
+    import zstandard as zstd
+    ZSTD_AVAILABLE = True
+except ImportError:
+    ZSTD_AVAILABLE = False
+    log = logging.getLogger(__name__)
+    log.warning("⚠️  zstandard module not available - compressed payloads will not be supported")
+
 warnings.filterwarnings('ignore', category=DeprecationWarning)
 
 # ============================
@@ -567,17 +575,33 @@ def load_or_create_all_models():
 def validate_data(data: Dict[str, Any]) -> bool:
     """Validate incoming sensor data"""
     try:
+        # Check data type
+        if not isinstance(data, dict):
+            log.error(f"❌ Data validation failed: Expected dict, got {type(data)}")
+            return False
+        # Check required features
         for feature in FEATURE_NAMES:
             if feature not in data:
+                log.error(f"❌ Data validation failed: Missing required field '{feature}'")
+                log.debug(f"   Available fields: {list(data.keys())}")
                 return False
             
             value = data[feature]
-            if not isinstance(value, (int, float)):
+            # Type validation
+            if not isinstance(value, (int, float, type(None))):
+                log.error(f"❌ Data validation failed: {feature} has invalid type {type(value)}, expected int/float")
                 return False
             
+            # Handle None values
+            if value is None:
+                log.warning(f"⚠️  Field '{feature}' is None, using default value")
+                data[feature] = 0  # Default value
+                continue
+            # Range validation
             min_val, max_val = FEATURE_RANGES[feature]
             if not (min_val <= value <= max_val):
-                return False
+                log.warning(f"⚠️  Field '{feature}' = {value} is outside valid range [{min_val}, {max_val}], clamping to range")
+                data[feature] = max(min_val, min(max_val, value))
         
         return True
     
@@ -793,13 +817,81 @@ def on_message(client, userdata, msg):
     global message_count
     
     try:
-        try:
-            payload = msg.payload.decode('utf-8')
-            data = json.loads(payload)
-        except (UnicodeDecodeError, json.JSONDecodeError) as e:
-            log.error(f"❌ Invalid message format: {e}")
+        payload_str = None
+        data = None
+        # Check for empty payload
+        if not msg.payload or len(msg.payload) == 0:
+            log.error(f"❌ Empty payload received from topic '{msg.topic}'")
+            log.debug(f"   Payload length: {len(msg.payload) if msg.payload else 0} bytes")
             return
+        try:
+            # Try UTF-8 decoding first (standard payload)
+            try:
+                payload_str = msg.payload.decode('utf-8')
+                # Check for empty string after decode
+                if not payload_str or payload_str.strip() == '':
+                    log.error(f"❌ Empty string after UTF-8 decode from topic '{msg.topic}'")
+                    log.debug(f"   Raw payload (hex): {msg.payload[:50].hex()}")
+                    log.debug(f"   Payload length: {len(msg.payload)} bytes")
+                    return
+                data = json.loads(payload_str)
+            except UnicodeDecodeError:
+                # Payload is not UTF-8, might be compressed
+                if ZSTD_AVAILABLE:
+                    try:
+                        log.debug(f"⏳ UTF-8 decode failed, attempting Zstandard decompression...")
+                        decompressor = zstd.ZstdDecompressor()
+                        decompressed = decompressor.decompress(msg.payload)
+                        payload_str = decompressed.decode('utf-8')
+                        # Check for empty string after decompress
+                        if not payload_str or payload_str.strip() == '':
+                            log.error(f"❌ Empty string after Zstandard decompression from topic '{msg.topic}'")
+                            log.debug(f"   Decompressed length: {len(decompressed)} bytes")
+                            return
+                        data = json.loads(payload_str)
+                        log.debug(f"✅ Successfully decompressed Zstandard payload ({len(msg.payload)} → {len(decompressed)} bytes)")
+                    except Exception as decomp_err:
+                        log.error(f"❌ Zstandard decompression failed: {decomp_err}")
+                        # Try latin-1 fallback
+                        payload_str = msg.payload.decode('latin-1')
+                        if not payload_str or payload_str.strip() == '':
+                            log.error(f"❌ Empty string after latin-1 fallback from topic '{msg.topic}'")
+                            return
+                        data = json.loads(payload_str)
+                else:
+                    # No zstd available, try latin-1
+                    log.warning(f"⚠️  zstandard not available, trying latin-1 fallback")
+                    payload_str = msg.payload.decode('latin-1')
+                    if not payload_str or payload_str.strip() == '':
+                        log.error(f"❌ Empty string after latin-1 decode from topic '{msg.topic}'")
+                        return
+                    data = json.loads(payload_str)
+            if data is None:
+                log.error(f"❌ Failed to parse message payload - data is None")
+                log.debug(f"   Topic: {msg.topic}")
+                log.debug(f"   Payload length: {len(msg.payload)} bytes")
+                return
         
+        except UnicodeDecodeError as ue:
+            log.error(f"❌ Invalid message encoding: {ue}")
+            log.debug(f"   Topic: {msg.topic}")
+            log.debug(f"   Raw payload (hex): {msg.payload[:50].hex() if len(msg.payload) > 0 else 'empty'}")
+            log.debug(f"   Payload length: {len(msg.payload)} bytes")
+            return
+        except json.JSONDecodeError as je:
+            log.error(f"❌ Invalid JSON format: {je}")
+            log.debug(f"   Topic: {msg.topic}")
+            log.debug(f"   Payload length: {len(msg.payload) if msg.payload else 0} bytes")
+            if payload_str:
+                log.debug(f"   Decoded string length: {len(payload_str)} chars")
+                log.debug(f"   Payload preview (first 100 chars): {payload_str[:100]!r}")
+                log.debug(f"   First 5 chars (repr): {payload_str[:5]!r}")
+            return
+        except Exception as e:
+            log.error(f"❌ Unexpected message decode error: {e}", exc_info=True)
+            log.debug(f"   Topic: {msg.topic}")
+            log.debug(f"   Payload length: {len(msg.payload)} bytes")
+            return
         message_count += 1
         
         # Detect anomaly
